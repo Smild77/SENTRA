@@ -280,6 +280,10 @@ async function getPool() {
     poolIncrement: 1,
     poolTimeout: 60,
     stmtCacheSize: 10,
+    /* ★ [FIX] เพดานเวลารอ connection ว่างจาก pool — default คือ 60 วิ
+       ถ้า pool เต็ม poll จะค้างรอเงียบ ๆ นานกว่า POLL_TIMEOUT_MS เสียอีก
+       ทำให้ watchdog เข้าใจผิดว่า query ช้า ทั้งที่ยังไม่ได้เริ่ม query ด้วยซ้ำ */
+    queueTimeout: POLL_TIMEOUT_MS,
   })
   console.log(`[DB] Oracle Pool created: ${connectString}`)
   return pool
@@ -1406,12 +1410,16 @@ async function poll() {
   isPolling = true
   const myGen = ++pollGeneration
 
-  /* ★ [FIX] Watchdog ตัวจริง — ของเดิมแค่ console.warn เฉย ๆ ไม่ได้ปลดล็อก isPolling
-     ผลคือถ้า Oracle ค้างครั้งเดียว poll รอบถัดไปจะไม่มีวันรัน dashboard ค้างเงียบ ๆ ตลอดไป */
+  /* ★ [FIX] Watchdog "เตือนอย่างเดียว" — ห้ามปลดล็อก isPolling ตรงนี้เด็ดขาด
+     ของเดิมมันปลดล็อกทิ้งทั้งที่ query เก่ายังวิ่งอยู่ใน Oracle อีก POLL_INTERVAL_MS
+     ถัดมารอบใหม่ก็ไปหยิบ connection เส้นใหม่จาก pool (poolMax=3) ผลคือมี query
+     24 ชม. ตัวหนักวิ่งพร้อมกันได้ถึง 3 เส้น แย่ง DB กันเอง ทุกเส้นเลยเกิน timeout
+     → ช้าเกินเพดานแค่ "ครั้งเดียว" ระบบจะล็อกตัวเองตายถาวร ฟื้นเองไม่ได้เลย
+     ตอนนี้กันการค้างด้วย conn.callTimeout + pool queueTimeout แทน ซึ่งการันตีว่า
+     poll จะ settle เสมอ แล้ว scheduleNextPoll ค่อยตั้งรอบถัดไปหลังรอบนี้จบจริง */
   const watchdog = setTimeout(() => {
     if (pollGeneration === myGen && isPolling) {
-      console.warn(`[Poll] Timeout ${POLL_TIMEOUT_MS}ms — ปลดล็อกให้รอบถัดไปรันต่อ (ผลของรอบนี้จะถูกทิ้ง)`)
-      isPolling = false
+      console.warn(`[Poll] ยังไม่จบใน ${POLL_TIMEOUT_MS}ms — รอบถัดไปจะเริ่มหลังรอบนี้จบ (ไม่ยิงซ้อน)`)
     }
   }, POLL_TIMEOUT_MS)
 
@@ -1540,8 +1548,26 @@ function startPolling() {
     console.log(`[Poll] ★ FILTER: ${ALLOWED_MACHINES.length} machine(s): ${ALLOWED_MACHINES.join(', ')}`)
   }
   console.log(`[Poll] Started — every ${POLL_INTERVAL_MS}ms, last ${POLL_MINUTES} min`)
-  poll() // first poll immediately
-  pollTimer = setInterval(poll, POLL_INTERVAL_MS)
+  runPollCycle() // first poll immediately
+}
+
+/* ★ [FIX] ตั้งรอบถัดไป "หลังรอบนี้จบแล้ว" แทน setInterval
+   setInterval ยิงตามนาฬิกาไม่สนว่ารอบก่อนจบหรือยัง พอ query ใช้เวลานานกว่า
+   POLL_INTERVAL_MS รอบใหม่จะทับรอบเก่าไปเรื่อย ๆ จน DB รับไม่ไหว
+   แบบนี้ถ้า query ใช้ 5 วิ ก็จะได้ข้อมูลใหม่ทุก 5 วิ (ช้าลงนิดหน่อย)
+   แทนที่จะยิงซ้อนกันทุก 3 วิจนไม่ได้ข้อมูลเลยสักรอบ */
+function scheduleNextPoll(elapsedMs) {
+  if (!pollingStarted) return // shutdown แล้ว
+  pollTimer = setTimeout(runPollCycle, Math.max(0, POLL_INTERVAL_MS - elapsedMs))
+}
+
+async function runPollCycle() {
+  const t0 = Date.now()
+  try {
+    await poll()
+  } finally {
+    scheduleNextPoll(Date.now() - t0)
+  }
 }
 
 // ─── WebSocket (no Redis) ─────────────────────────────
@@ -2105,7 +2131,10 @@ async function main() {
 
 async function shutdown() {
   console.log('\n[Server] Shutting down...')
-  if (pollTimer) clearInterval(pollTimer)
+  // ★ pollTimer เป็น setTimeout แล้ว (ไม่ใช่ setInterval) — เคลียร์แล้วปิดสวิตช์
+  //   ไม่ให้ scheduleNextPoll ตั้งรอบใหม่ระหว่างกำลังปิด pool
+  pollingStarted = false
+  if (pollTimer) clearTimeout(pollTimer)
   if (qrPurgeTimer) clearInterval(qrPurgeTimer)
   clearInterval(wsHeartbeatTimer)
   for (const ws of clients) ws.close()
