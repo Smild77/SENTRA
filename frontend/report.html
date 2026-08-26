@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>SENTRA — Machine Summary</title>
+<link rel="icon" type="image/svg+xml" href="brand/sentra-icon-accent-512.svg"/>
+<link rel="icon" type="image/png" sizes="32x32" href="brand/favicon-32.png"/>
+<link rel="apple-touch-icon" href="brand/apple-touch-icon.png"/>
+<meta name="theme-color" content="#0d1117"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;
+  --surface:#161b22;
+  --surface2:#21262d;
+  --border:#30363d;
+  --text:#e6edf3;
+  --muted:#8b949e;
+  --accent:#58a6ff;
+  --run:#3fb950;
+  --idle:#d29922;
+  --down:#f85149;
+  --header-h:52px;
+  --fs-xs:10px;
+  --fs-sm:11px;
+  --fs-md:12px;
+  --fs-lg:13px;
+  --fs-xl:15px;
+  --fs-2xl:20px;
+  /* ★ ความกว้างคอลัมน์ชื่อเครื่อง — แกน tick กับแท่งใช้ค่าเดียวกัน จะได้ตรงกันเป๊ะ */
+  --label-w:210px;
+  --val-w:96px;
+}
+/* ฟอนต์ชุดเดียวกับ index.html — โหลดจากในโปรเจกต์ ไม่พึ่งเน็ต */
+@font-face{
+  font-family:'Noto Sans Thai';
+  src:url('fonts/noto-sans-thai-var.woff2') format('woff2');
+  font-weight:100 900;font-style:normal;font-display:swap;
+  unicode-range:U+02D7,U+0303,U+0331,U+0E01-0E5B,U+200C-200D,U+25CC;
+}
+@font-face{
+  font-family:'Archivo';
+  src:url('fonts/archivo-800-latin.woff2') format('woff2');
+  font-weight:800;font-style:normal;font-display:swap;
+  unicode-range:U+0041-005A;
+}
+html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'Segoe UI Variable','Segoe UI','Noto Sans Thai',system-ui,-apple-system,sans-serif;font-size:var(--fs-lg);-webkit-font-smoothing:antialiased}
+.tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+
+/* ═══════ Header (ชุดเดียวกับ index.html) ═══════ */
+#header{position:sticky;top:0;height:var(--header-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;z-index:20}
+.logo{display:flex;align-items:center;gap:8px;text-decoration:none}
+.brand-mark{width:24px;height:24px;flex-shrink:0;display:block}
+.wordmark{font-family:'Archivo','Segoe UI Variable','Segoe UI',system-ui,sans-serif;font-weight:800;font-size:19px;letter-spacing:-.5px;line-height:1;color:#fff}
+.vdiv{width:1px;height:22px;background:var(--border)}
+.hinfo{font-size:var(--fs-md);color:var(--muted);white-space:nowrap}
+.spacer{flex:1}
+.hbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:var(--fs-md);cursor:pointer;text-decoration:none;font-family:inherit;white-space:nowrap}
+.hbtn:hover{border-color:var(--accent);color:var(--accent)}
+#langSelect{height:28px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:var(--fs-md);padding:0 6px;cursor:pointer;font-family:inherit}
+
+/* ═══════ Toolbar ═══════ */
+main{max-width:1400px;margin:0 auto;padding:14px 16px 40px}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px}
+.tgroup{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tlbl{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap}
+.chip{height:28px;padding:0 11px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:var(--fs-md);cursor:pointer;font-family:inherit;white-space:nowrap}
+.chip:hover{color:var(--text);border-color:#484f58}
+.chip.active{background:rgba(88,166,255,.14);border-color:var(--accent);color:var(--accent);font-weight:600}
+select.ctl,input.ctl{height:28px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:var(--fs-md);padding:0 7px;font-family:inherit}
+select.ctl:focus,input.ctl:focus{outline:none;border-color:var(--accent)}
+input.ctl[type=date]{color-scheme:dark}
+.search-ctl{width:170px}
+.chk{display:flex;align-items:center;gap:5px;font-size:var(--fs-md);color:var(--muted);cursor:pointer;user-select:none}
+.chk input{accent-color:var(--accent);cursor:pointer}
+.tdiv{width:1px;height:22px;background:var(--border)}
+#customDates{display:none;align-items:center;gap:6px}
+#customDates.show{display:flex}
+
+/* ═══════ KPI ═══════ */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.kpi-lbl{font-size:var(--fs-sm);color:var(--muted);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-val{font-size:var(--fs-2xl);font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi-sub{font-size:var(--fs-xs);color:var(--muted);margin-top:2px}
+.kpi.ok .kpi-val{color:var(--run)}
+.kpi.err .kpi-val{color:var(--down)}
+.kpi.warn .kpi-val{color:var(--idle)}
+.kpi.acc .kpi-val{color:var(--accent)}
+
+/* ═══════ Chart card ═══════ */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.card-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid var(--border)}
+.card-title{font-size:var(--fs-xl);font-weight:700}
+.card-sub{font-size:var(--fs-sm);color:var(--muted)}
+.chart-wrap{padding:10px 14px 16px;overflow-x:auto}
+.chart{min-width:640px}
+.chart.msg-only{min-width:0}
+.row,.axis{display:grid;grid-template-columns:26px var(--label-w) 1fr var(--val-w);align-items:center;gap:10px}
+.axis{height:22px;font-size:var(--fs-xs);color:var(--muted);border-bottom:1px solid var(--border);margin-bottom:6px;padding-bottom:4px}
+.axis-ticks{position:relative;height:14px}
+.axis-tick{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;font-variant-numeric:tabular-nums}
+.axis-tick:first-child{transform:none}
+.axis-tick:last-child{transform:translateX(-100%)}
+.axis-unit{text-align:right;font-size:var(--fs-xs);color:var(--muted)}
+
+.row{width:100%;background:none;border:0;border-radius:6px;padding:3px 4px;color:inherit;font-family:inherit;text-align:left;cursor:pointer}
+.row:hover{background:var(--surface2)}
+.row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.row-rank{font-size:var(--fs-xs);color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.row-label{min-width:0;overflow:hidden}
+.rl-id{display:block;font-size:var(--fs-md);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rl-name{display:block;font-size:var(--fs-xs);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* เส้นกริดทุก 25% วางเป็นพื้นหลังของราง จะได้ตรงกับ tick ด้านบนเสมอ */
+.row-track{position:relative;height:20px;border-radius:3px;background-image:repeating-linear-gradient(90deg,var(--border) 0 1px,transparent 1px 25%)}
+.bar{position:absolute;left:0;top:2px;bottom:2px;display:flex;border-radius:3px;overflow:hidden;transition:width .18s ease}
+.seg{height:100%}
+.seg.ok{background:var(--run)}
+.seg.err{background:var(--down)}
+.seg.solid-acc{background:var(--accent)}
+.seg.solid-run{background:var(--run)}
+.seg.solid-idle{background:var(--idle)}
+.seg.solid-down{background:var(--down)}
+.row-val{text-align:right;font-size:var(--fs-md);font-variant-numeric:tabular-nums;white-space:nowrap}
+.row-val .rv-sub{display:block;font-size:var(--fs-xs);color:var(--muted)}
+.row.zero .rl-id,.row.zero .row-val{color:var(--muted)}
+/* เส้นเป้าหมาย %QR — เปิดเฉพาะตอนดูตัววัด %QR */
+.rows.show-target .row-track::after,.axis.show-target .axis-ticks::after{
+  content:'';position:absolute;left:var(--target,99%);top:-2px;bottom:-2px;border-left:1px dashed var(--idle);opacity:.9
+}
+.axis.show-target .axis-ticks::after{top:0;bottom:-6px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:8px 14px 0;font-size:var(--fs-sm);color:var(--muted)}
+.lg{display:flex;align-items:center;gap:5px}
+.lg-sw{width:10px;height:10px;border-radius:2px}
+.lg-line{width:12px;border-top:1px dashed var(--idle)}
+.msg{padding:34px 14px;text-align:center;color:var(--muted);font-size:var(--fs-lg)}
+.msg.error{color:var(--down)}
+.foot{margin-top:10px;font-size:var(--fs-sm);color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.skel{height:26px;border-radius:4px;background:linear-gradient(90deg,var(--surface2) 25%,#2c333c 50%,var(--surface2) 75%);background-size:200% 100%;animation:sk 1.2s linear infinite;margin-bottom:6px}
+@keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+@media(max-width:820px){
+  :root{--label-w:130px;--val-w:78px}
+  .hinfo,.wordmark{display:none}
+  main{padding:10px 8px 32px}
+  .chart{min-width:520px}
+  /* จอแคบ: ช่องค้นหายืดเต็มแถวที่เหลือ ไม่ดันชุดตัวกรองให้ล้นออกนอกจอ */
+  .search-ctl{flex:1 1 130px;width:auto;min-width:110px}
+  .toolbar{gap:6px}
+  #header{padding:0 8px;gap:6px}
+  .hbtn{padding:0 7px;font-size:var(--fs-sm)}
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <a class="logo" href="index.html" id="logoLink" target="sentra-dashboard" title="Dashboard">
+    <svg class="brand-mark" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sentra">
+      <circle cx="24" cy="24" r="20" fill="none" stroke="#FFFFFF" stroke-width="3.2"/>
+      <circle cx="24" cy="24" r="11" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-dasharray="12 8" stroke-linecap="round"/>
+      <circle cx="24" cy="4" r="4.6" fill="#3B6FE0"/>
+    </svg>
+    <span class="wordmark">SENTRA</span>
+  </a>
+  <div class="vdiv"></div>
+  <span class="hinfo" data-i18n="rpTitle">สรุปรายเครื่อง</span>
+  <div class="spacer"></div>
+  <button class="hbtn" onclick="refresh()" id="refreshBtn"><span data-i18n="rpRefresh">รีเฟรช</span></button>
+  <button class="hbtn" onclick="exportCsv()">⬇ CSV</button>
+  <button class="hbtn" onclick="exportPng()">📷 PNG</button>
+  <a class="hbtn" href="index.html" id="backLink" target="sentra-dashboard"><span data-i18n="rpBack">แผนที่</span></a>
+  <select id="langSelect" onchange="setLang(this.value)">
+    <option value="th">TH</option>
+    <option value="en">EN</option>
+    <option value="ch" selected>CH</option>
+  </select>
+</div>
+
+<main>
+  <div class="toolbar">
+    <div class="tgroup">
+      <span class="tlbl" data-i18n="rpRange">ช่วงเวลา</span>
+      <button class="chip active" data-range="today"     onclick="setRange('today')"     data-i18n="rpToday">วันนี้</button>
+      <button class="chip"        data-range="yesterday" onclick="setRange('yesterday')" data-i18n="rpYesterday">เมื่อวาน</button>
+      <button class="chip"        data-range="week"      onclick="setRange('week')"      data-i18n="rpWeek">7 วัน</button>
+      <button class="chip"        data-range="month"     onclick="setRange('month')"     data-i18n="rpMonth">30 วัน</button>
+      <button class="chip"        data-range="custom"    onclick="setRange('custom')"    data-i18n="rpCustom">กำหนดเอง</button>
+    </div>
+    <div id="customDates">
+      <input class="ctl" type="date" id="startDate" onchange="onCustomDate()"/>
+      <span class="tlbl">–</span>
+      <input class="ctl" type="date" id="endDate" onchange="onCustomDate()"/>
+    </div>
+    <div class="tdiv"></div>
+    <div class="tgroup">
+      <span class="tlbl" data-i18n="rpMetric">ตัววัด</span>
+      <button class="chip active" data-metric="panels" onclick="setMetric('panels')" data-i18n="rpMetricPanels">จำนวนแผ่น</button>
+      <button class="chip"        data-metric="pct"    onclick="setMetric('pct')"    data-i18n="rpMetricQr">% QR</button>
+      <button class="chip"        data-metric="err"    onclick="setMetric('err')"    data-i18n="rpMetricErr">แผ่น Error</button>
+    </div>
+    <div class="tdiv"></div>
+    <div class="tgroup">
+      <select class="ctl" id="factorySel" onchange="onFilterChange()"></select>
+      <select class="ctl" id="floorSel" onchange="onFilterChange()"></select>
+      <select class="ctl" id="sortSel" onchange="onFilterChange()">
+        <option value="desc" data-i18n="rpSortDesc">มาก → น้อย</option>
+        <option value="asc"  data-i18n="rpSortAsc">น้อย → มาก</option>
+        <option value="name" data-i18n="rpSortName">ตามชื่อเครื่อง</option>
+      </select>
+      <select class="ctl" id="topSel" onchange="onFilterChange()">
+        <option value="0"  data-i18n="rpTopAll">ทั้งหมด</option>
+        <option value="10">Top 10</option>
+        <option value="20">Top 20</option>
+        <option value="50">Top 50</option>
+      </select>
+      <input class="ctl search-ctl" type="search" id="searchBox" oninput="onFilterChange()" data-i18n-ph="rpSearch" placeholder="ค้นหาเครื่อง..."/>
+      <label class="chk"><input type="checkbox" id="showZero" checked onchange="onFilterChange()"/><span data-i18n="rpShowZero">รวมเครื่องที่ไม่มีข้อมูล</span></label>
+      <label class="chk"><input type="checkbox" id="autoRefresh" checked onchange="setupAutoRefresh()"/><span data-i18n="rpAuto">รีเฟรชอัตโนมัติ</span></label>
+    </div>
+  </div>
+
+  <div id="capture">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title" id="chartTitle">—</div>
+        <div class="card-sub" id="chartSub"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="chart-wrap"><div class="chart" id="chart"></div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span data-i18n="rpClickHint">คลิกที่แท่งเพื่อเปิดเครื่องนั้นบนแผนที่</span>
+    <span id="updatedAt"></span>
+  </div>
+</main>
+
+<script src="vendor/html2canvas.min.js"></script>
+<script src="i18n/th.js"></script>
+<script src="i18n/en.js"></script>
+<script src="i18n/ch.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════
+   SENTRA — หน้าสรุปรายเครื่อง (กราฟแท่ง)
+   ข้อมูลทั้งหมดมาจาก GET /api/qr-summary ที่มีอยู่แล้ว
+   ไม่มี endpoint ใหม่ ไม่มี dependency ใหม่ (SVG/CSS ล้วน)
+   ═══════════════════════════════════════════════════════ */
+var API = window.API_BASE || location.origin;
+
+var T = { th: window.I18N_TH || {}, en: window.I18N_EN || {}, ch: window.I18N_CH || {} };
+var curLang = 'ch';
+function t(k){ return (T[curLang] && T[curLang][k]) || k; }
+
+var MACHINES_DB = {};      /* factory -> floor -> [machine] */
+var MACHINE_META = {};     /* id -> {name, factory, floor, zone} */
+var QR_TARGET_PCT = 99;
+var rows = [];             /* by_machine ที่ merge กับผังแล้ว */
+var rangeLabel = '';
+var autoTimer = null;
+var loading = false;
+
+var state = {
+  range: 'today', start: '', end: '',
+  metric: 'panels', factory: '', floor: '', sort: 'desc', top: 0, q: '', showZero: true
+};
+
+/* ─── helpers ─── */
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function nf(n){ return (n || 0).toLocaleString('en-US'); }
+function localDateStr(d){
+  d = d || new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function pctClass(p){
+  if (p >= QR_TARGET_PCT) return 'solid-run';
+  if (p >= QR_TARGET_PCT - 5) return 'solid-idle';
+  return 'solid-down';
+}
+
+/* ─── i18n ─── */
+function setLang(lang){
+  curLang = lang;
+  document.documentElement.lang = lang;
+  try { localStorage.setItem('sentraLang', lang); } catch(e){}
+  document.querySelectorAll('[data-i18n]').forEach(function(el){
+    var k = el.getAttribute('data-i18n');
+    if (T[lang] && T[lang][k] != null) el.textContent = T[lang][k];
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(function(el){
+    var k = el.getAttribute('data-i18n-ph');
+    if (T[lang] && T[lang][k] != null) el.placeholder = T[lang][k];
+  });
+  document.getElementById('langSelect').value = lang;
+  /* ลิงก์กลับหน้าแผนที่พาภาษาไปด้วย จะได้ไม่ต้องเลือกใหม่ */
+  document.getElementById('backLink').href = 'index.html?lang=' + lang;
+  document.getElementById('logoLink').href = 'index.html?lang=' + lang;
+  buildFilterOptions();
+  render();
+}
+
+/* ─── toolbar ─── */
+function setRange(r){
+  state.range = r;
+  document.querySelectorAll('.chip[data-range]').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-range') === r);
+  });
+  var box = document.getElementById('customDates');
+  box.classList.toggle('show', r === 'custom');
+  if (r === 'custom') {
+    if (!document.getElementById('startDate').value) {
+      var d = new Date(); d.setDate(d.getDate() - 6);
+      document.getElementById('startDate').value = localDateStr(d);
+      document.getElementById('endDate').value = localDateStr(new Date());
+    }
+    onCustomDate();
+  } else {
+    loadData();
+  }
+  setupAutoRefresh();
+}
+function onCustomDate(){
+  var s = document.getElementById('startDate').value;
+  var e = document.getElementById('endDate').value;
+  if (!s || !e) return;
+  if (s > e) { var tmp = s; s = e; e = tmp;
+    document.getElementById('startDate').value = s;
+    document.getElementById('endDate').value = e; }
+  state.start = s; state.end = e;
+  loadData();
+}
+function setMetric(m){
+  state.metric = m;
+  document.querySelectorAll('.chip[data-metric]').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-metric') === m);
+  });
+  render();
+}
+function onFilterChange(){
+  state.factory = document.getElementById('factorySel').value;
+  state.floor   = document.getElementById('floorSel').value;
+  state.sort    = document.getElementById('sortSel').value;
+  state.top     = parseInt(document.getElementById('topSel').value, 10) || 0;
+  state.q       = document.getElementById('searchBox').value.trim().toLowerCase();
+  state.showZero = document.getElementById('showZero').checked;
+  render();
+}
+function setupAutoRefresh(){
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  var on = document.getElementById('autoRefresh').checked;
+  /* ย้อนหลังไม่ขยับแล้ว รีเฟรชทิ้งเปล่า ๆ — เปิดเฉพาะช่วงที่มีวันนี้อยู่ด้วย */
+  if (on && (state.range === 'today' || state.range === 'week' || state.range === 'month')) {
+    autoTimer = setInterval(function(){ loadData(true); }, 60000);
+  }
+}
+function refresh(){ loadData(); }
+
+/* ─── filter options ─── */
+function buildFilterOptions(){
+  var fSel = document.getElementById('factorySel');
+  var flSel = document.getElementById('floorSel');
+  var keepF = fSel.value, keepFl = flSel.value;
+  var facts = Object.keys(MACHINES_DB).sort();
+  fSel.innerHTML = '<option value="">' + esc(t('rpAllFactories')) + '</option>';
+  facts.forEach(function(f){
+    fSel.innerHTML += '<option value="' + esc(f) + '">' + esc(f) + '</option>';
+  });
+  fSel.value = facts.indexOf(keepF) >= 0 ? keepF : '';
+  state.factory = fSel.value;
+
+  var floors = {};
+  facts.forEach(function(f){
+    if (state.factory && f !== state.factory) return;
+    Object.keys(MACHINES_DB[f] || {}).forEach(function(fl){ floors[fl] = 1; });
+  });
+  var flList = Object.keys(floors).sort();
+  flSel.innerHTML = '<option value="">' + esc(t('rpAllFloors')) + '</option>';
+  flList.forEach(function(fl){
+    flSel.innerHTML += '<option value="' + esc(fl) + '">' + esc(fl) + 'F</option>';
+  });
+  flSel.value = flList.indexOf(keepFl) >= 0 ? keepFl : '';
+  state.floor = flSel.value;
+}
+
+/* ─── data ─── */
+function loadLayout(){
+  return fetch(API + '/api/layout')
+    .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(data){
+      MACHINES_DB = (data && data.machines) || {};
+      if (data && data.qr_target_pct != null) QR_TARGET_PCT = parseFloat(data.qr_target_pct) || QR_TARGET_PCT;
+      MACHINE_META = {};
+      Object.keys(MACHINES_DB).forEach(function(f){
+        Object.keys(MACHINES_DB[f] || {}).forEach(function(fl){
+          (MACHINES_DB[f][fl] || []).forEach(function(m){
+            MACHINE_META[m.id] = { name: m.name || m.id, factory: f, floor: fl, zone: m.zone || '' };
+          });
+        });
+      });
+      buildFilterOptions();
+    });
+}
+
+function qrUrl(){
+  if (state.range === 'custom' && state.start && state.end) {
+    return API + '/api/qr-summary?start_date=' + encodeURIComponent(state.start) + '&end_date=' + encodeURIComponent(state.end);
+  }
+  return API + '/api/qr-summary?range=' + encodeURIComponent(state.range);
+}
+
+function loadData(silent){
+  if (loading) return;
+  loading = true;
+  var btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  if (!silent) renderSkeleton();
+  fetch(qrUrl())
+    .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(data){
+      if (data && data.error) throw new Error(data.error);
+      rangeLabel = (data && data.label) || '';
+      var seen = {};
+      rows = ((data && data.by_machine) || []).map(function(m){
+        seen[m.machine_id] = 1;
+        var meta = MACHINE_META[m.machine_id] || {};
+        return {
+          id: m.machine_id,
+          name: meta.name || m.machine_name || m.machine_id,
+          factory: meta.factory || '',
+          floor: meta.floor || '',
+          zone: meta.zone || '',
+          total: m.total || 0, ok: m.ok || 0, err: m.err || 0,
+          pct: m.pct_qr || 0,
+          onMap: !!meta.factory
+        };
+      });
+      /* เครื่องที่อยู่ในผังแต่ไม่มี event เลยในช่วงนี้ = ยอด 0 (ไม่ใช่ "ไม่มีเครื่อง") */
+      Object.keys(MACHINE_META).forEach(function(id){
+        if (seen[id]) return;
+        var meta = MACHINE_META[id];
+        rows.push({ id:id, name:meta.name, factory:meta.factory, floor:meta.floor, zone:meta.zone,
+                    total:0, ok:0, err:0, pct:0, onMap:true });
+      });
+      document.getElementById('updatedAt').textContent = t('rpUpdated') + ' ' + new Date().toLocaleTimeString();
+      render();
+    })
+    .catch(function(e){
+      console.error('[Report] load failed:', e.message);
+      document.getElementById('chartTitle').textContent = t(state.metric === 'pct' ? 'rpMetricQr' : state.metric === 'err' ? 'rpMetricErr' : 'rpMetricPanels');
+      document.getElementById('chartSub').textContent = '';
+      var chartEl = document.getElementById('chart');
+      chartEl.className = 'chart msg-only';
+      chartEl.innerHTML =
+        '<div class="msg error">' + esc(t('rpLoadFail')) + '<br><span style="font-size:11px">' + esc(e.message) + '</span></div>';
+      document.getElementById('kpis').innerHTML = '';
+      document.getElementById('legend').innerHTML = '';
+    })
+    .then(function(){ loading = false; btn.disabled = false; });
+}
+
+/* ─── filtering / sorting ─── */
+function visibleRows(noLimit){
+  var out = rows.filter(function(r){
+    if (state.factory && r.factory !== state.factory) return false;
+    if (state.floor && r.floor !== state.floor) return false;
+    if (!state.showZero && r.total === 0) return false;
+    /* %QR ของเครื่องที่ไม่มีแผ่นเลยเป็น 0 ซึ่งไม่ได้แปลว่าอ่านไม่ได้ — ตัดออกจากกราฟ %QR เสมอ */
+    if (state.metric === 'pct' && r.total === 0) return false;
+    if (state.q) {
+      var hay = (r.id + ' ' + r.name + ' ' + r.zone).toLowerCase();
+      if (hay.indexOf(state.q) < 0) return false;
+    }
+    return true;
+  });
+  var val = metricValue;
+  out.sort(function(a, b){
+    if (state.sort === 'name') return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    var d = val(a) - val(b);
+    if (d === 0) return a.id < b.id ? -1 : 1;
+    return state.sort === 'asc' ? d : -d;
+  });
+  if (!noLimit && state.top > 0) out = out.slice(0, state.top);
+  return out;
+}
+function metricValue(r){
+  if (state.metric === 'pct') return r.pct;
+  if (state.metric === 'err') return r.err;
+  return r.total;
+}
+
+/* ─── render ─── */
+function renderSkeleton(){
+  document.getElementById('chart').className = 'chart msg-only';
+  var h = '';
+  for (var i = 0; i < 10; i++) h += '<div class="skel"></div>';
+  document.getElementById('chart').innerHTML = h;
+}
+
+function render(){
+  if (!rows.length) return;
+  /* KPI นับจากตัวกรอง (โรงงาน/ชั้น/ค้นหา) ทั้งหมด ไม่หายไปตาม Top-N ที่เป็นแค่การแสดงผล */
+  var full = visibleRows(true);
+  var list = state.top > 0 ? full.slice(0, state.top) : full;
+  renderKpis(full);
+  renderChart(list, full.length);
+}
+
+function renderKpis(list){
+  var total = 0, ok = 0, err = 0, withData = 0, below = 0;
+  list.forEach(function(r){
+    total += r.total; ok += r.ok; err += r.err;
+    if (r.total > 0) { withData++; if (r.pct < QR_TARGET_PCT) below++; }
+  });
+  var pct = total > 0 ? Math.round(ok * 1000 / total) / 10 : 0;
+  var tiles = [
+    { cls:'acc',  lbl:t('rpKpiPanels'),   val:nf(total), sub:rangeLabel },
+    { cls:'ok',   lbl:t('rpKpiOk'),       val:nf(ok),    sub:'' },
+    { cls:'err',  lbl:t('rpKpiErr'),      val:nf(err),   sub:'' },
+    { cls:(pct >= QR_TARGET_PCT ? 'ok' : 'warn'), lbl:t('rpKpiPct'), val:pct.toFixed(1) + '%', sub:t('rpTarget') + ' ' + QR_TARGET_PCT + '%' },
+    { cls:'',     lbl:t('rpKpiMachines'), val:nf(withData) + ' / ' + nf(list.length), sub:'' },
+    { cls:(below ? 'warn' : 'ok'), lbl:t('rpKpiBelow'), val:nf(below), sub:t('rpTarget') + ' ' + QR_TARGET_PCT + '%' }
+  ];
+  document.getElementById('kpis').innerHTML = tiles.map(function(k){
+    return '<div class="kpi ' + k.cls + '">'
+      + '<div class="kpi-lbl">' + esc(k.lbl) + '</div>'
+      + '<div class="kpi-val">' + esc(k.val) + '</div>'
+      + '<div class="kpi-sub">' + esc(k.sub || ' ') + '</div></div>';
+  }).join('');
+}
+
+function renderChart(list, totalCount){
+  var isPct = state.metric === 'pct';
+  var titleKey = isPct ? 'rpMetricQr' : (state.metric === 'err' ? 'rpMetricErr' : 'rpMetricPanels');
+  document.getElementById('chartTitle').textContent = t(titleKey);
+  document.getElementById('chartSub').textContent =
+    (rangeLabel ? rangeLabel + ' · ' : '')
+    + (totalCount != null && totalCount > list.length ? list.length + ' / ' + totalCount : list.length)
+    + ' ' + t('rpMachinesUnit');
+
+  /* legend */
+  var lg = '';
+  if (state.metric === 'panels') {
+    lg = '<span class="lg"><span class="lg-sw" style="background:var(--run)"></span>' + esc(t('rpLegendOk')) + '</span>'
+       + '<span class="lg"><span class="lg-sw" style="background:var(--down)"></span>' + esc(t('rpLegendErr')) + '</span>';
+  } else if (isPct) {
+    lg = '<span class="lg"><span class="lg-sw" style="background:var(--run)"></span>&ge; ' + QR_TARGET_PCT + '%</span>'
+       + '<span class="lg"><span class="lg-sw" style="background:var(--idle)"></span>&ge; ' + (QR_TARGET_PCT - 5) + '%</span>'
+       + '<span class="lg"><span class="lg-sw" style="background:var(--down)"></span>&lt; ' + (QR_TARGET_PCT - 5) + '%</span>'
+       + '<span class="lg"><span class="lg-line"></span>' + esc(t('rpTarget')) + ' ' + QR_TARGET_PCT + '%</span>';
+  } else {
+    lg = '<span class="lg"><span class="lg-sw" style="background:var(--down)"></span>' + esc(t('rpLegendErr')) + '</span>';
+  }
+  document.getElementById('legend').innerHTML = lg;
+
+  var el = document.getElementById('chart');
+  if (!list.length) { el.className = 'chart msg-only'; el.innerHTML = '<div class="msg">' + esc(t('rpNoData')) + '</div>'; return; }
+  el.className = 'chart';
+
+  var max = isPct ? 100 : Math.max.apply(null, list.map(metricValue));
+  if (!isFinite(max) || max <= 0) max = 1;
+
+  /* ★ %QR ของทุกเครื่องมักอยู่ 97-100% ถ้าลากแกนจาก 0 แท่งจะยาวเท่ากันหมดจนดูไม่ออกว่าใครแย่กว่า
+     → ตัดฐานแกนขึ้นมาให้เห็นความต่าง แล้วบอกไว้ใต้หัวข้อว่าแกนเริ่มที่เท่าไร (ไม่ให้เข้าใจผิด) */
+  var axisMin = 0;
+  if (isPct) {
+    var lo = Math.min.apply(null, list.map(metricValue));
+    var cands = [98, 95, 90, 80, 50, 0];
+    for (var ci = 0; ci < cands.length; ci++) {
+      if (cands[ci] <= lo - 0.5 && cands[ci] <= QR_TARGET_PCT - 1) { axisMin = cands[ci]; break }
+    }
+  }
+  var span = max - axisMin;
+  if (span <= 0) span = 1;
+  if (axisMin > 0) {
+    document.getElementById('chartSub').textContent += ' · ' + t('rpAxisFrom') + ' ' + axisMin + '%';
+  }
+
+  /* หัวแกน: tick 0/25/50/75/100% ของช่วงที่แสดง — ตรงกับเส้นกริดใน .row-track */
+  var ticks = [0, .25, .5, .75, 1].map(function(f){
+    var v = axisMin + span * f;
+    var txt = isPct ? (Math.round(v * 10) / 10) + '%' : nf(Math.round(v));
+    return '<span class="axis-tick" style="left:' + (f * 100) + '%">' + txt + '</span>';
+  }).join('');
+  var targetStyle = isPct ? ' style="--target:' + ((QR_TARGET_PCT - axisMin) * 100 / span) + '%"' : '';
+  var head = '<div class="axis' + (isPct ? ' show-target' : '') + '"' + targetStyle + '>'
+    + '<span></span><span class="tlbl">' + esc(t('rpMachine')) + '</span>'
+    + '<span class="axis-ticks">' + ticks + '</span>'
+    + '<span class="axis-unit">' + esc(isPct ? '%' : t('rpUnitSheets')) + '</span></div>';
+
+  var body = list.map(function(r, i){
+    var v = metricValue(r);
+    var w = v <= 0 ? 0 : Math.max(1, Math.min(100, (v - axisMin) * 100 / span));
+    var bar, val;
+    if (state.metric === 'panels') {
+      var okW  = r.total > 0 ? r.ok * 100 / r.total : 0;
+      var errW = r.total > 0 ? r.err * 100 / r.total : 0;
+      bar = '<span class="seg ok" style="width:' + okW + '%"></span>'
+          + '<span class="seg err" style="width:' + errW + '%"></span>';
+      val = nf(r.total) + '<span class="rv-sub">' + r.pct.toFixed(1) + '%</span>';
+    } else if (isPct) {
+      bar = '<span class="seg ' + pctClass(r.pct) + '" style="width:100%"></span>';
+      val = r.pct.toFixed(1) + '%<span class="rv-sub">' + nf(r.total) + '</span>';
+    } else {
+      bar = '<span class="seg solid-down" style="width:100%"></span>';
+      val = nf(r.err) + '<span class="rv-sub">' + (r.total > 0 ? (r.err * 100 / r.total).toFixed(1) + '%' : '—') + '</span>';
+    }
+    var tip = r.id + ' · ' + r.name
+      + (r.factory ? '\n' + r.factory + ' ' + r.floor + 'F' : '')
+      + (r.zone ? ' · ' + r.zone : '')
+      + '\n' + t('rpKpiPanels') + ': ' + nf(r.total)
+      + '\n' + t('rpLegendOk') + ': ' + nf(r.ok) + '  ' + t('rpLegendErr') + ': ' + nf(r.err)
+      + '\n% QR: ' + r.pct.toFixed(1) + '%';
+    return '<button class="row' + (r.total === 0 ? ' zero' : '') + '" title="' + esc(tip) + '"'
+      + ' onclick="openMachine(\'' + esc(r.id).replace(/'/g, "\\'") + '\')">'
+      + '<span class="row-rank">' + (i + 1) + '</span>'
+      + '<span class="row-label"><span class="rl-id">' + esc(r.id) + '</span>'
+      + '<span class="rl-name">' + esc(r.name) + '</span></span>'
+      + '<span class="row-track"><span class="bar" style="width:' + w + '%">' + bar + '</span></span>'
+      + '<span class="row-val">' + val + '</span></button>';
+  }).join('');
+
+  el.innerHTML = head + '<div class="rows' + (isPct ? ' show-target' : '') + '"' + targetStyle + '>' + body + '</div>';
+}
+
+/* ─── actions ─── */
+function openMachine(id){
+  var meta = MACHINE_META[id];
+  if (!meta) { alert(t('rpNotOnMap')); return; }
+  var url = 'index.html?machine=' + encodeURIComponent(id) + '&lang=' + curLang;
+  /* ★ หน้านี้ถูกเปิดเป็นแท็บใหม่ ถ้าเด้งทับตัวเองกราฟจะหาย
+     → ยิงไปที่แท็บชื่อ 'sentra-dashboard' คลิกเครื่องถัดไปก็ใช้แท็บเดิมนั้นซ้ำ ไม่งอกเรื่อย ๆ */
+  var w = window.open(url, 'sentra-dashboard');
+  if (w) { try { w.focus() } catch(e) {} } else { location.href = url; }
+}
+
+function exportCsv(){
+  var list = visibleRows();
+  var head = ['machine_id','machine_name','factory','floor','zone','total','ok','err','pct_qr'];
+  var lines = [head.join(',')];
+  list.forEach(function(r){
+    lines.push([r.id, r.name, r.factory, r.floor, r.zone, r.total, r.ok, r.err, r.pct]
+      .map(function(v){
+        var s = String(v == null ? '' : v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(','));
+  });
+  /* BOM ให้ Excel อ่านไทย/จีนไม่เพี้ยน */
+  var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sentra_machine_summary_' + (state.range === 'custom' ? state.start + '_' + state.end : state.range) + '.csv';
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+}
+
+function exportPng(){
+  var node = document.getElementById('capture');
+  if (typeof html2canvas === 'undefined') { alert('html2canvas not loaded'); return; }
+  html2canvas(node, { backgroundColor: '#0d1117', scale: 2, useCORS: true, allowTaint: true })
+    .then(function(c){
+      var a = document.createElement('a');
+      a.download = 'sentra_summary_' + new Date().toISOString().slice(0,19).replace(/[T:]/g,'-') + '.png';
+      a.href = c.toDataURL('image/png');
+      a.click();
+    })
+    .catch(function(e){ console.error('[Report] png failed:', e.message); });
+}
+
+/* ─── keyboard ─── */
+document.addEventListener('keydown', function(e){
+  var tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+    if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); onFilterChange(); }
+    return;
+  }
+  if (e.key === '/') { e.preventDefault(); document.getElementById('searchBox').focus(); }
+  else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refresh(); }
+  else if (e.key === '1') setMetric('panels');
+  else if (e.key === '2') setMetric('pct');
+  else if (e.key === '3') setMetric('err');
+});
+
+/* ─── boot ─── */
+(function(){
+  var lang = 'ch';
+  try {
+    var p = new URLSearchParams(location.search);
+    lang = p.get('lang') || localStorage.getItem('sentraLang') || 'ch';
+  } catch(e){}
+  if (!T[lang]) lang = 'ch';
+  curLang = lang;
+  renderSkeleton();
+  loadLayout()
+    .catch(function(e){
+      /* ผังโหลดไม่ได้ก็ยังดูกราฟได้ แค่ไม่มีชื่อ/ตัวกรองโรงงาน */
+      console.warn('[Report] /api/layout failed:', e.message);
+    })
+    .then(function(){
+      setLang(lang);
+      loadData();
+      setupAutoRefresh();
+    });
+})();
+</script>
+</body>
+</html>

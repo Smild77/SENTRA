@@ -867,6 +867,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .hist-err{color:var(--down);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hist-empty{font-size:11px;color:#555d65;padding:8px 0}
 
+/* ═══════ Report link (→ report.html) ═══════ */
+.header-report{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--muted);font-size:11px;font-weight:600;text-decoration:none;white-space:nowrap;transition:color .15s,border-color .15s}
+.header-report:hover{color:var(--accent);border-color:var(--accent)}
+.header-report svg{width:13px;height:13px;fill:currentColor;flex-shrink:0}
+/* จอแคบเหลือแค่ไอคอน — ข้อความยาวสุดคือภาษาไทย เบียดปุ่มอื่นจนหลุดแถว */
+@media(max-width:900px){.header-report span{display:none}.header-report{padding:0 7px}}
+
 /* ═══════ Alert Bell ═══════ */
 .header-bell{position:relative;cursor:pointer;margin-left:6px;display:inline-flex;align-items:center;vertical-align:middle;padding:4px}
 .header-bell svg{width:20px;height:20px;fill:var(--muted);transition:fill .2s}
@@ -1014,6 +1021,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
     <div class="badge idle"><div class="dot"></div><span id="cnt-idle">0</span> IDLE</div>
     <div class="badge down"><div class="dot"></div><span id="cnt-down">0</span> DOWN</div>
   </div>
+  <!-- ★ หน้าสรุปรายเครื่อง (กราฟแท่ง) — report.html เป็นหน้าแยก โหลดข้อมูลจาก /api/qr-summary เอง -->
+  <a class="header-report" id="reportLink" href="report.html" target="_blank" rel="noopener" data-i18n-title="rpLinkTitle" title="สรุปรายเครื่อง (กราฟแท่ง)">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 20V10h3v10H4zm6.5 0V4h3v16h-3zM17 20v-7h3v7h-3z"/></svg>
+    <span data-i18n="rpTitle">สรุปรายเครื่อง</span>
+  </a>
   <!-- Language Selector -->
   <select id="langSelect" onchange="setLang(this.value)">
     <option value="th">TH</option>
@@ -1541,6 +1553,12 @@ function setLang(lang){
     var k = el.getAttribute('data-i18n-title');
     if(T[lang] && T[lang][k] != null) el.title = T[lang][k];
   });
+  /* ★ ตอนมาจาก ?lang= ตัว select ยังค้างที่ค่า default ต้อง sync ให้ตรงกับภาษาที่ใช้จริง */
+  var langSel = document.getElementById('langSelect');
+  if (langSel && langSel.value !== lang) langSel.value = lang;
+  /* ★ พาภาษาติดไปหน้าสรุปรายเครื่องด้วย จะได้ไม่ต้องเลือกซ้ำอีกรอบ */
+  var reportLink = document.getElementById('reportLink');
+  if (reportLink) reportLink.href = 'report.html?lang=' + lang;
   /* Floor select options */
   updateFloorSelectOptions();
   /* Factory list (Coming Soon text) */
@@ -4929,7 +4947,40 @@ function boot(){
   connectWS();
   /* Apply initial language to search placeholder */
   document.getElementById('machineSearch').setAttribute('data-i18n-ph','search');
-  setLang(curLang);
+  var dl = readDeepLink();
+  setLang(dl.lang || curLang);
+  if (dl.machine) applyMachineDeepLink(dl.machine);
+}
+
+/* ★ Deep link — report.html ส่ง ?machine=<id>&lang=<xx> กลับมา
+   (เปิดเองจากที่อื่นก็ได้ ใช้ลิงก์เดียวกันแปะใน chat ได้เลย) */
+function readDeepLink(){
+  var out = { machine:null, lang:null };
+  try {
+    var p = new URLSearchParams(location.search);
+    var m = p.get('machine');
+    var l = p.get('lang');
+    if (m) out.machine = m;
+    if (l && T[l]) out.lang = l;
+  } catch(e) {}
+  return out;
+}
+
+function applyMachineDeepLink(id){
+  for (var fid in MACHINES_DB) {
+    var floors = MACHINES_DB[fid] || {};
+    for (var fl in floors) {
+      var found = (floors[fl] || []).some(function(m){ return m.id === id });
+      if (!found) continue;
+      var fac = FACTORIES.find(function(x){ return x.id === fid });
+      if (!fac || !(fac.active || fid === 'PA01')) return;
+      selectFactory(fid);
+      /* selectFactory เคลียร์ชั้นทิ้ง → รอ DOM ของชั้นถูกสร้างก่อนค่อยเด้งไปที่เครื่อง */
+      setTimeout(function(){ goToMachine(id, parseInt(fl, 10)) }, 60);
+      return;
+    }
+  }
+  console.warn('[DeepLink] ไม่พบเครื่อง ' + id + ' ในผัง');
 }
 
 function showBootError(msg){

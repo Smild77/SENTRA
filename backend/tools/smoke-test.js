@@ -152,6 +152,36 @@ async function run() {
   check('#mini-map ถูกซ่อนตอนจอแคบ รวมกรณีมีคลาส .show ด้วย',
     /#mini-map,#mini-map\.show\{display:none\}/.test(indexHtml.replace(/\s*\n\s*/g, '')))
 
+  console.log('\n=== 3d. หน้าสรุปรายเครื่อง (report.html) ===')
+  const reportPath = path.join(ROOT, '..', 'frontend', 'report.html')
+  check('มีไฟล์ frontend/report.html', fs.existsSync(reportPath))
+  if (fs.existsSync(reportPath)) {
+    const reportHtml = fs.readFileSync(reportPath, 'utf8')
+    const rExternal = reportHtml.match(/(?:src|href)=["']https?:\/\/[^"']+/g) || []
+    check('report.html ไม่มี src/href ชี้ออกอินเทอร์เน็ต', rExternal.length === 0, rExternal.join(', '))
+    check('report.html มี <meta viewport>', /<meta\s+name=["']viewport["']/.test(reportHtml))
+    check('report.html ใช้ /api/qr-summary (ไม่ต้องมี endpoint ใหม่)',
+      reportHtml.indexOf('/api/qr-summary') >= 0)
+    check('index.html มีลิงก์ไป report.html', indexHtml.indexOf('href="report.html"') >= 0)
+    check('index.html รับ deep link ?machine= จากหน้าสรุป',
+      indexHtml.indexOf('applyMachineDeepLink') >= 0)
+    // ★ คีย์ที่หน้า report เรียกใช้ต้องมีครบทั้ง 3 ภาษา ไม่งั้นจะโชว์ชื่อคีย์ดิบ ๆ บนหน้าจอ
+    if (Object.keys(dicts).length === 3) {
+      const used = new Set()
+      const re = /data-i18n(?:-ph|-title)?=["']([A-Za-z0-9_]+)["']/g
+      let m
+      while ((m = re.exec(reportHtml)) !== null) used.add(m[1])
+      ;(reportHtml.match(/\bt\(\s*'([A-Za-z0-9_]+)'\s*\)/g) || []).forEach((s) => {
+        used.add(s.replace(/^t\(\s*'/, '').replace(/'\s*\)$/, ''))
+      })
+      for (const l in dicts) {
+        const missing = [...used].filter((k) => !(k in dicts[l]))
+        check('report.html: ภาษา ' + l + ' มีคีย์ครบ (' + used.size + ' คีย์)',
+          missing.length === 0, 'ขาด: ' + missing.slice(0, 10).join(', '))
+      }
+    }
+  }
+
   // ─── ส่วนที่ต้อง start server ─────────────────────────
   console.log('\n=== 4. Start server (ไม่ต้องมี Oracle) ===')
   const backupMachines = fs.readFileSync(MACHINES_PATH)
@@ -195,6 +225,12 @@ async function run() {
     check('GET / มี ETag', !!html.headers.get('etag'))
     check('GET / เป็น no-cache (แก้ index.html แล้วเห็นผลทันที)',
       html.headers.get('cache-control') === 'no-cache', html.headers.get('cache-control'))
+
+    const report = await get('/report.html')
+    check('GET /report.html ตอบ 200', report.status === 200, 'ได้ ' + report.status)
+    check('GET /report.html เป็น HTML',
+      (report.headers.get('content-type') || '').indexOf('text/html') >= 0,
+      report.headers.get('content-type'))
 
     const img = await get('/maps/' + (activeMaps[0] || '').replace('maps/', ''))
     if (img.status === 200) {
