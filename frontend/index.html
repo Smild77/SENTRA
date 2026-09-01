@@ -582,6 +582,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .mi-date-bar.is-history{border-color:var(--idle);background:rgba(210,153,34,.08)}
 .mi-hist-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:var(--idle-bg);border:1px solid var(--idle);color:var(--idle);font-size:10px;font-weight:700;margin-left:6px;white-space:nowrap}
 .mi-hist-badge::before{content:'\1F4C5';font-size:11px}
+.mi-nomap-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-size:10px;font-weight:700;margin-left:6px;white-space:nowrap;flex-shrink:0}
+.mi-nomap-badge::before{content:'\1F4CD';font-size:11px}
+.info-panel-title .ipt-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .mi-loading-overlay{padding:12px;text-align:center;color:var(--accent);font-size:11px;font-weight:600}
 .mi-no-data{padding:14px 8px;text-align:center;color:var(--muted);font-size:11px;line-height:1.5;border:1px dashed var(--border);border-radius:5px;background:var(--surface2)}
 
@@ -2728,7 +2731,10 @@ function renderPopup(id, fromLive){
 
   /* ★ Set info-panel title */
   var s=machineState[id]||{};var sev=getSev(s);
-  document.getElementById('infoPanelTitle').innerHTML='<img src="'+svgUri(ALERT_SVG[sev]||ALERT_SVG.info)+'" alt="'+sev+'">'+escH(m?m.name:id);
+  /* ★ เครื่องนอกผังไม่มีชื่อในไฟล์ layout — ใช้ชื่อที่ DB ส่งมาแทน แล้วติดป้ายให้รู้ว่ายังไม่ได้วางตำแหน่ง */
+  document.getElementById('infoPanelTitle').innerHTML='<img src="'+svgUri(ALERT_SVG[sev]||ALERT_SVG.info)+'" alt="'+sev+'">'
+    +'<span class="ipt-name">'+escH(m ? m.name : (s.machine_name || id))+'</span>'
+    +(m ? '' : '<span class="mi-nomap-badge">'+escH(t('miNotOnLayout'))+'</span>');
 
   /* ★ ถ้าเลือกวันย้อนหลัง (ไม่ใช่วันนี้) → โหลด historical state */
   var selectedDate = miDateEl ? miDateEl.value : todayStr;
@@ -4980,7 +4986,25 @@ function applyMachineDeepLink(id){
       return;
     }
   }
-  console.warn('[DeepLink] ไม่พบเครื่อง ' + id + ' ในผัง');
+  /* ★ [FIX] เครื่องที่ยังไม่ได้วางบนผัง (เครื่องใหม่ หรือเครื่องที่มีแต่ข้อมูลใน DB)
+     เดิมกดมาจากหน้า report แล้วเงียบไปเลย ไม่มีอะไรขึ้น — ตอนนี้เปิดแผงข้อมูลให้
+     ดูสถานะ/ประวัติ QR/ประวัติ alarm ได้ตามปกติ แค่ไม่มีหมุดให้เด้งไปบนแผนที่ */
+  console.warn('[DeepLink] ไม่พบเครื่อง ' + id + ' ในผัง — เปิดแผงข้อมูลแบบไม่มีหมุดแทน');
+  openMachineOffMap(id);
+}
+
+/* ★ เปิดแผงข้อมูลเครื่องโดยไม่ต้องมีหมุดบนผัง — ข้อมูลทุกอย่างในแผงดึงด้วย machine_id
+   ผ่าน API อยู่แล้ว ผังใช้แค่หาตำแหน่งหมุดกับชื่อเครื่องเท่านั้น */
+function openMachineOffMap(id){
+  document.querySelectorAll('.mk.selected').forEach(function(el){el.classList.remove('selected')});
+  selId = id;
+  if (typeof panelMode !== 'undefined' && panelMode === 'minimized') {
+    var chip = document.getElementById('panel-minimized-chip');
+    if (chip) chip.classList.remove('show');
+    panelMode = 'drawer';
+  }
+  renderPopup(id);
+  document.getElementById('info-panel').classList.add('open');
 }
 
 function showBootError(msg){

@@ -257,8 +257,12 @@ window.I18N_CH = {
   rpLegendErr:'异常',
   rpUpdated:'最后更新',
   rpLoadFail:'数据加载失败',
+  rpLoadingLong:'较长的时间范围加载较慢，请稍候…',
+  rpTimeout:'加载超时',
+  rpTimeoutHint:'请选择较短的时间范围，或再次点击刷新（结果已缓存，下次会更快）。',
   rpNoData:'— 当前条件下没有数据 —',
   rpClickHint:'点击柱状图可在地图上打开该机台',
   rpAxisFrom:'坐标轴起点',
   rpNotOnMap:'该机台尚未在布局图上定位',
+  miNotOnLayout:'未在布局图上',
 };

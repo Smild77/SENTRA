@@ -125,6 +125,63 @@ const STALE_MINUTES = posInt(process.env.STALE_MINUTES, POLL_MINUTES)
 const POLL_TIMEOUT_MS = posInt(process.env.POLL_TIMEOUT_MS, 15000)
 // ★ query ที่ใช้เกินค่านี้จะถูก log ไว้ — เตือนก่อนที่มันจะโตจนชน POLL_TIMEOUT_MS
 const SLOW_QUERY_WARN_MS = posInt(process.env.SLOW_QUERY_WARN_MS, Math.round(POLL_TIMEOUT_MS / 3))
+/* ★ เพดานเวลาของ query ฝั่ง API — คนละตัวกับ POLL_TIMEOUT_MS
+   poll ต้องจบเร็วเพราะยิงทุก 3 วิ ส่วน API ผู้ใช้กดเองครั้งเดียวและอาจขอช่วง 7/30 วัน
+   จึงให้เวลามากกว่าได้ แต่ต้อง "มีเพดาน" ไม่งั้น query ยาวจะจอง connection ค้างจนเต็ม pool
+   แล้ว poll กับ API เส้นอื่นพลอยตายตาม (นี่คืออาการ time out ที่เห็นตอนเลือก 7 วัน) */
+const API_TIMEOUT_MS = posInt(process.env.API_TIMEOUT_MS, 90000)
+/* ★ [FIX] ค่าเดียวใช้ไม่พอ — 90 วิพอสำหรับ 7 วัน แต่ 30 วันข้อมูลเยอะกว่าหลายเท่า
+   จึงชน callTimeout แล้วเด้ง "time out" ทุกครั้ง ตอนนี้แยกเพดานตาม "ความยาวช่วงที่ขอ"
+   และปรับได้ทาง .env ทีละตัวโดยไม่ต้องแก้โค้ด */
+const API_TIMEOUT_WEEK_MS  = posInt(process.env.API_TIMEOUT_WEEK_MS, 180000)   // ช่วง 3–7 วัน
+const API_TIMEOUT_MONTH_MS = posInt(process.env.API_TIMEOUT_MONTH_MS, 300000)  // ยาวกว่า 7 วัน (เช่น 30 วัน)
+// ★ เส้นแบ่งว่าช่วงกี่วันนับเป็น "สั้น" / "สัปดาห์" / "ยาว"
+const API_TIMEOUT_SHORT_MAX_DAYS = posInt(process.env.API_TIMEOUT_SHORT_MAX_DAYS, 2)
+const API_TIMEOUT_WEEK_MAX_DAYS  = posInt(process.env.API_TIMEOUT_WEEK_MAX_DAYS, 7)
+/* ★ override ราย API — ใส่เมื่อเส้นไหนหนักกว่าเพื่อนจริง ๆ
+   0 หรือไม่ตั้ง = คิดตามความยาวช่วงตามปกติ (ชื่อ key ตรงกับ path จะได้ไล่ log ง่าย) */
+const API_TIMEOUT_BY_ENDPOINT = {
+  'qr-summary':      posInt(process.env.API_TIMEOUT_QR_SUMMARY_MS, 0),
+  'qr-history':      posInt(process.env.API_TIMEOUT_QR_HISTORY_MS, 0),
+  'qr-daily':        posInt(process.env.API_TIMEOUT_QR_DAILY_MS, 0),
+  'status-history':  posInt(process.env.API_TIMEOUT_STATUS_HISTORY_MS, 0),
+  'machine-history': posInt(process.env.API_TIMEOUT_MACHINE_HISTORY_MS, 0),
+  'lot-report':      posInt(process.env.API_TIMEOUT_LOT_REPORT_MS, 0),
+  'machines':        posInt(process.env.API_TIMEOUT_MACHINES_MS, 0),
+}
+/* ★ เวลารอ connection ว่างจาก pool — ต้องยาวกว่าเดิม เพราะ query ช่วง 30 วัน
+   จอง connection ได้นานเป็นนาที ถ้าคิวสั้นไปเส้นอื่นจะเด้ง NJS-040 (queue timeout)
+   ทั้งที่ DB ยังไม่ได้ช้าเลย */
+const QUEUE_TIMEOUT_MS = posInt(process.env.ORACLE_QUEUE_TIMEOUT_MS, Math.max(POLL_TIMEOUT_MS, 30000))
+
+// ★ จำนวนวันของช่วงที่ขอ (ปัดขึ้น อย่างน้อย 1)
+function rangeDays(start, end) {
+  if (!(start instanceof Date) || !(end instanceof Date)) return 1
+  const ms = end.getTime() - start.getTime()
+  if (!Number.isFinite(ms) || ms <= 0) return 1
+  return Math.max(1, Math.ceil(ms / 86400000))
+}
+// ★ เพดานเวลาของ API เส้นนั้น: override ราย endpoint มาก่อน ถ้าไม่มีก็ดูความยาวช่วง
+function apiTimeoutForDays(endpoint, days) {
+  const override = API_TIMEOUT_BY_ENDPOINT[endpoint] || 0
+  if (override > 0) return override
+  const d = Number.isFinite(days) && days > 0 ? days : 1
+  if (d <= API_TIMEOUT_SHORT_MAX_DAYS) return API_TIMEOUT_MS
+  if (d <= API_TIMEOUT_WEEK_MAX_DAYS) return API_TIMEOUT_WEEK_MS
+  return API_TIMEOUT_MONTH_MS
+}
+// r = { start, end } หรือ null สำหรับ query ที่ไม่มีช่วงเวลา
+function apiTimeoutFor(endpoint, r) {
+  return apiTimeoutForDays(endpoint, r ? rangeDays(r.start, r.end) : 1)
+}
+// ★ เพดานที่ยาวที่สุดที่เป็นไปได้ — frontend ใช้ตัดสินว่าจะรอสูงสุดเท่าไร
+function maxApiTimeoutMs() {
+  var vals = [API_TIMEOUT_MS, API_TIMEOUT_WEEK_MS, API_TIMEOUT_MONTH_MS]
+  Object.keys(API_TIMEOUT_BY_ENDPOINT).forEach(function(k) {
+    if (API_TIMEOUT_BY_ENDPOINT[k] > 0) vals.push(API_TIMEOUT_BY_ENDPOINT[k])
+  })
+  return Math.max.apply(null, vals)
+}
 
 // ★ เทส: จำกัดเครื่อง (null = ทุกเครื่อง)
 const ALLOWED_MACHINES = process.env.ALLOWED_MACHINES
@@ -276,14 +333,17 @@ async function getPool() {
     password: process.env.ORACLE_PASSWORD,
     connectString,
     poolMin: 1,
-    poolMax: 3,
+    /* ★ [FIX] 3 น้อยไปเมื่อ API ช่วงยาวจอง connection ได้นานถึง API_TIMEOUT_MS
+       poll กินไป 1 เส้นเสมอ เหลือ 2 ให้ทั้ง UI หลักและหน้า report — ผู้ใช้เปิดสองหน้าพร้อมกัน
+       ก็เต็มแล้ว เส้นถัดไปต้องรอคิวจนชน queueTimeout = อาการ "time out" ที่เห็น */
+    poolMax: posInt(process.env.ORACLE_POOL_MAX, 6),
     poolIncrement: 1,
     poolTimeout: 60,
     stmtCacheSize: 10,
     /* ★ [FIX] เพดานเวลารอ connection ว่างจาก pool — default คือ 60 วิ
        ถ้า pool เต็ม poll จะค้างรอเงียบ ๆ นานกว่า POLL_TIMEOUT_MS เสียอีก
        ทำให้ watchdog เข้าใจผิดว่า query ช้า ทั้งที่ยังไม่ได้เริ่ม query ด้วยซ้ำ */
-    queueTimeout: POLL_TIMEOUT_MS,
+    queueTimeout: QUEUE_TIMEOUT_MS,
   })
   console.log(`[DB] Oracle Pool created: ${connectString}`)
   return pool
@@ -368,27 +428,28 @@ function getDateRangeFromParams(startStr, endStr) {
     → เปลี่ยนมาใช้ blacklist แทน: ฟอร์แมตแปลกใหม่ที่ยังไม่รู้จักจะถูก "นับ" ไว้ก่อน ปลอดภัยกว่านับขาด
 */
 
-// ตัดทุกอย่างหลัง ',' หรือ '/' ออก → ได้ ID แกนกลางของแผ่น (CLOB → VARCHAR2 เพื่อให้ DISTINCT ได้)
-const SQL_NORM_PANEL = `UPPER(REGEXP_SUBSTR(DBMS_LOB.SUBSTR(PANEL_ID, 100, 1), '^[^,/]+'))`
+/* ★ กฎทั้งสามข้อล่างรับ "ชื่อคอลัมน์" เข้ามา ไม่ฝัง PANEL_ID ไว้ตายตัว
+   เพราะ panelBaseSql() แปลง CLOB เป็น VARCHAR2 (PANEL_TXT/PANEL_LEN) ให้ครั้งเดียวแล้ว
+   กฎจึงทำงานบนค่าที่แปลงแล้วได้เลย — และยังมีนิยามอยู่ที่เดียวเหมือนเดิม */
+
+// ตัดทุกอย่างหลัง ',' หรือ '/' ออก → ได้ ID แกนกลางของแผ่น (VARCHAR2 เพื่อให้ DISTINCT ได้)
+const sqlNormPanel = (txt) => `UPPER(REGEXP_SUBSTR(${txt}, '^[^,/]+'))`
 
 // ไม่ใช่แผ่นงาน — ตัดเฉพาะ 4 กรณีที่ยืนยันแล้ว (ทดสอบกับ qr-logs: ตัดออก 7 ID, เหลือแผ่นดี 5,463 ID ครบ)
-const SQL_IS_JUNK_PANEL = `(
-       ${SQL_NORM_PANEL} LIKE 'DUMMY%'
-       OR REGEXP_LIKE(${SQL_NORM_PANEL}, 'M[0-9]{7}[A-Z][0-9]{4}')
-       OR REGEXP_LIKE(${SQL_NORM_PANEL}, '[^0-9A-Z]')
-       OR LENGTH(${SQL_NORM_PANEL}) < 10
-     )`
+const sqlIsJunkPanel = (norm) => `(
+                         ${norm} LIKE 'DUMMY%'
+                      OR REGEXP_LIKE(${norm}, 'M[0-9]{7}[A-Z][0-9]{4}')
+                      OR REGEXP_LIKE(${norm}, '[^0-9A-Z]')
+                      OR LENGTH(${norm}) < 10
+                    )`
 
-// แถวที่อ่าน QR ไม่ได้ (null / ว่าง / Error / NULL) — ใช้เกณฑ์เดิม แต่ทำ UPPER ทุกที่ให้ครอบคลุม 'ERROR_' ตัวใหญ่
-const SQL_IS_UNREAD = `(PANEL_ID IS NULL OR DBMS_LOB.GETLENGTH(PANEL_ID) = 0 OR UPPER(DBMS_LOB.SUBSTR(PANEL_ID, 5, 1)) = 'ERROR' OR UPPER(DBMS_LOB.SUBSTR(PANEL_ID, 20, 1)) LIKE '%NULL%')`
-
-// คอลัมน์มาตรฐานที่ใช้ต่อ: NORM_PANEL (ID ที่ normalize แล้ว) + IS_REAL (1 = แผ่นงานจริง) + IS_UNREAD (1 = อ่านไม่ได้)
-const SQL_PANEL_FLAGS = `
-          ${SQL_NORM_PANEL} AS NORM_PANEL,
-          CASE WHEN ${SQL_IS_UNREAD} THEN 1 ELSE 0 END AS IS_UNREAD,
-          CASE WHEN ${SQL_IS_UNREAD} THEN 0
-               WHEN ${SQL_IS_JUNK_PANEL} THEN 0
-               ELSE 1 END AS IS_REAL`
+/* แถวที่อ่าน QR ไม่ได้ (null / ว่าง / Error / NULL) — ใช้เกณฑ์เดิม แต่ทำ UPPER ทุกที่ให้ครอบคลุม 'ERROR_' ตัวใหญ่
+   หมายเหตุ: DBMS_LOB.SUBSTR ของ LOB ยาว 0 คืน NULL อยู่แล้ว ${txt} IS NULL จึงครอบคลุมทั้ง
+   PANEL_ID IS NULL และ GETLENGTH = 0 ของเดิม (คง ${len} = 0 ไว้ด้วยเพื่อให้เจตนาชัด) */
+const sqlIsUnread = (txt, len) => `(${txt} IS NULL
+                        OR ${len} = 0
+                        OR UPPER(SUBSTR(${txt}, 1, 5))  = 'ERROR'
+                        OR UPPER(SUBSTR(${txt}, 1, 20)) LIKE '%NULL%')`
 
 // นับ "แผ่น" ไม่ใช่ "แถว": OK = แผ่นงานจริงแบบไม่ซ้ำ, ERROR = จำนวนครั้งที่อ่านไม่ได้ (ซ้ำไม่ได้อยู่แล้ว)
 const SQL_COUNT_OK  = `COUNT(DISTINCT CASE WHEN IS_REAL = 1 THEN NORM_PANEL END)`
@@ -402,6 +463,64 @@ const SQL_COUNT_ERR = `SUM(IS_UNREAD)`
   (เช่น GLD-IR-01-UL ได้ OK=0/ERR=24 = 0% ขณะที่ GLD-IR-01-L LOT เดียวกันได้ 40/0 = 100%)
 */
 const SQL_IS_PANEL_EVENT = `(CEID IS NULL OR TO_CHAR(CEID) <> '10117')`
+
+/*
+  ★ [PERF] panelBaseSql() — บล็อกมาตรฐานที่คืน NORM_PANEL / IS_UNREAD / IS_REAL
+  ให้ query ทุกเส้นใช้ร่วมกัน (แทน SQL_PANEL_FLAGS แบบชั้นเดียวของเดิม)
+
+  ทำไมต้องเปลี่ยน — จาก tools/diagnose-poll-perf.js กับข้อมูลจริง:
+      scan 140,854 แถว (24 ชม.) = 62ms      ← อ่านตารางแทบไม่มีต้นทุน
+      aggregate                 = 14.7s     ← 99.6% ของเวลาอยู่ที่งานราย "แถว"
+      คิดเป็น ~0.10 ms/แถว และโตเป็นเส้นตรง → 7 วัน ≈ 1M แถว ≈ 100 วินาที
+  งานรายแถวนั้นคือการแตะ CLOB. ของเดิม SQL_PANEL_FLAGS ประเมินซ้ำทุกแถว:
+      NORM_PANEL 5 ครั้ง (select list 1 + inline ในเช็ค junk อีก 4)
+      IS_UNREAD  2 ครั้ง (ครั้งละ 3 DBMS_LOB call)
+  รวม ~11 DBMS_LOB call + 5 REGEXP_SUBSTR ต่อแถว ทั้งที่ค่าที่ได้เหมือนกันหมด
+
+  ของใหม่แบ่งเป็น 3 ชั้น ให้แต่ละค่าคำนวณ "ครั้งเดียว" แล้วส่งต่อเป็น VARCHAR2:
+      ชั้นใน   DBMS_LOB.SUBSTR / GETLENGTH  ครั้งเดียว → PANEL_TXT, PANEL_LEN
+      ชั้นกลาง REGEXP_SUBSTR                ครั้งเดียว → NORM_PANEL, IS_UNREAD
+      ชั้นนอก  เช็ค junk บน NORM_PANEL ที่มีอยู่แล้ว    → IS_REAL
+  ตรรกะเท่าเดิมเป๊ะ:
+      - DBMS_LOB.SUBSTR(PANEL_ID, 5|20, 1) เป็น prefix ของ (PANEL_ID, 100, 1) อยู่แล้ว
+        จึงใช้ SUBSTR(PANEL_TXT, 1, 5|20) แทนได้ตรง ๆ
+      - LOB ยาว 0 ทำให้ DBMS_LOB.SUBSTR คืน NULL → PANEL_TXT IS NULL ครอบคลุมทั้ง
+        PANEL_ID IS NULL และ GETLENGTH = 0 (คง PANEL_LEN = 0 ไว้ด้วยเพื่อความชัดเจน)
+  NO_MERGE กัน optimizer พับชั้นกลับเข้าหากันแล้วทำให้กลับไปคำนวณซ้ำเหมือนเดิม
+
+  ★ ยืนยันตัวเลขก่อนเชื่อ: รัน `node tools/ab-panel-sql.js 1440` บนเครื่องที่ต่อ DB ได้
+    มันเทียบ SQL เก่า/ใหม่บนหน้าต่างเดียวกัน แล้วบอกทั้ง "เร็วขึ้นกี่เท่า" และ
+    "ตัวเลขตรงกันทุกเครื่องไหม" — ถ้าตัวเลขไม่ตรง ห้ามใช้
+
+  cols  : array ของ [expr, alias] คอลัมน์ที่ต้องดึงจากตารางหลักและส่งผ่านออกมา
+  where : เงื่อนไข WHERE ที่ใช้กับตารางหลัก (bind ใช้ชื่อ/หมายเลขได้ตามปกติ)
+  withPanelText : ส่ง PANEL_TXT (100 ตัวแรกของ PANEL_ID เป็น VARCHAR2) ออกมาด้วย
+                  สำหรับเส้นที่ต้องโชว์ ID ดิบ — ใช้แทนการลาก CLOB ผ่านทั้ง 3 ชั้น
+*/
+function panelBaseSql(cols, where, withPanelText) {
+  const inner = cols.map(function(c) { return c[0] + ' AS ' + c[1] }).join(',\n                   ')
+  const pass  = cols.map(function(c) { return c[1] }).join(', ')
+  const txt   = withPanelText ? 'PANEL_TXT, ' : ''
+  return `
+        SELECT ${pass}, ${txt}NORM_PANEL, IS_UNREAD,
+               CASE WHEN IS_UNREAD = 1 THEN 0
+                    WHEN ${sqlIsJunkPanel('NORM_PANEL')} THEN 0
+                    ELSE 1 END AS IS_REAL
+        FROM (
+          SELECT /*+ NO_MERGE */ ${pass}, ${txt}
+                 ${sqlNormPanel('PANEL_TXT')} AS NORM_PANEL,
+                 CASE WHEN ${sqlIsUnread('PANEL_TXT', 'PANEL_LEN')}
+                      THEN 1 ELSE 0 END AS IS_UNREAD
+          FROM (
+            SELECT /*+ NO_MERGE */
+                   ${inner},
+                   DBMS_LOB.SUBSTR(PANEL_ID, 100, 1) AS PANEL_TXT,
+                   DBMS_LOB.GETLENGTH(PANEL_ID)      AS PANEL_LEN
+            FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
+            WHERE ${where}
+          )
+        )`
+}
 
 /*
   ★ [FIX] Total Sheet นับ "ต่อ LOT" ไม่ใช่ 24 ชม.
@@ -429,6 +548,8 @@ async function fetchLotReport(days = 7) {
     p = await getPool()
     conn = await p.getConnection()
   }
+  /* ★ [FIX] เพดานเวลาฝั่ง API — กัน query ช่วงยาวจอง connection ค้างจนเต็ม pool */
+  conn.callTimeout = apiTimeoutForDays('lot-report', days)
   try {
     const sql = `
       WITH panel_read AS (
@@ -437,24 +558,30 @@ async function fetchLotReport(days = 7) {
               SUB_EQP_NAME,
               SUB_EQP_ID,
               LOT_ID,
-              PANEL_ID,
               DATE_TIME,
               /* ★ [FIX] เดิม PARTITION BY LOT_ID, PANEL_ID เฉยๆ → แผ่นเดียวกันที่ผ่านทั้ง -L และ -UL
                  ถูกตัดทิ้งไปฝั่งหนึ่ง ทำให้เครื่องปลายทางนับได้น้อยกว่าจริง จึงต้องแยกตามเครื่องด้วย
                  และ dedup ด้วย ID ที่ normalize แล้ว (ตัด ",BD" / "/0" ออก) */
               ROW_NUMBER() OVER (
-                  PARTITION BY SUB_EQP_ID, LOT_ID, ${SQL_NORM_PANEL}
+                  PARTITION BY SUB_EQP_ID, LOT_ID, NORM_PANEL
                   ORDER BY DATE_TIME
               ) AS rn
-          FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
-          WHERE (SUB_EQP_ID LIKE '%-L'  OR  SUB_EQP_ID LIKE '%-UL')
-            /* ★ [FIX] เดิมเทียบ 'Error' แบบ case-sensitive → 'ERROR_...' ตัวใหญ่หลุดมานับเป็นแผ่นดี */
-            AND NOT ${SQL_IS_UNREAD}
-            /* ★ [FIX] ตัดแผ่น dummy / jig / สแกนเพี้ยนออกจากยอดผลิต */
-            AND NOT ${SQL_IS_JUNK_PANEL}
-            /* ★ [FIX] ตัด event ที่ไม่ใช่การอ่านแผ่น */
-            AND ${SQL_IS_PANEL_EVENT}
-            AND DATE_TIME >= SYSDATE - :1
+          FROM (
+${panelBaseSql([
+            ['MAIN_EQP_ID', 'MAIN_EQP_ID'],
+            ['SUB_EQP_NAME', 'SUB_EQP_NAME'],
+            ['SUB_EQP_ID', 'SUB_EQP_ID'],
+            ['LOT_ID', 'LOT_ID'],
+            ['DATE_TIME', 'DATE_TIME']
+          ], `(SUB_EQP_ID LIKE '%-L'  OR  SUB_EQP_ID LIKE '%-UL')
+              /* ★ [FIX] ตัด event ที่ไม่ใช่การอ่านแผ่น */
+              AND ${SQL_IS_PANEL_EVENT}
+              AND DATE_TIME >= SYSDATE - :1`)}
+          )
+          /* ★ IS_REAL = 1 คือ "อ่าน QR ได้ และไม่ใช่ dummy/jig/สแกนเพี้ยน"
+             ตรงกับเงื่อนไขเดิม NOT IS_UNREAD AND NOT IS_JUNK ทุกประการ
+             ต่างกันแค่ค่านี้ถูกคำนวณไว้ครั้งเดียวในชั้นล่าง ไม่ใช่ 7 ครั้งต่อแถว */
+          WHERE IS_REAL = 1
       ),
       lot_summary AS (
           SELECT
@@ -514,6 +641,8 @@ async function fetchLotReport(days = 7) {
 async function fetchAllMachines() {
   const p = await getPool()
   const conn = await p.getConnection()
+  /* ★ [FIX] เพดานเวลาฝั่ง API — กัน query ช่วงยาวจอง connection ค้างจนเต็ม pool */
+  conn.callTimeout = apiTimeoutFor('machines', null)
   try {
     const sql = `
       SELECT DISTINCT
@@ -565,15 +694,13 @@ let loggedFirstPollTiming = false
       ),
       -- ★ [FIX] normalize PANEL_ID + คัด dummy/jig ครั้งเดียว แล้วใช้ต่อทั้ง panel_stats และ lot_panel_stats
       panel_base AS (
-        SELECT
-          COALESCE(SUB_EQP_ID, MAIN_EQP_ID) AS MACHINE_ID,
-          LOT_ID,
-          DATE_TIME,
-${SQL_PANEL_FLAGS}
-        FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
         -- ★ ยอดสะสม ยังต้องมองย้อนหลังยาว แต่ปรับได้จาก .env แล้ว (ดู PANEL_STATS_MINUTES)
-        WHERE DATE_TIME >= SYSDATE - ${PANEL_STATS_MINUTES}/1440
-          AND ${SQL_IS_PANEL_EVENT}
+${panelBaseSql([
+        ['COALESCE(SUB_EQP_ID, MAIN_EQP_ID)', 'MACHINE_ID'],
+        ['LOT_ID', 'LOT_ID'],
+        ['DATE_TIME', 'DATE_TIME']
+      ], `DATE_TIME >= SYSDATE - ${PANEL_STATS_MINUTES}/1440
+              AND ${SQL_IS_PANEL_EVENT}`)}
       ),
       panel_stats AS (
         -- ★ ยอด 24 ชม. — ตอนนี้ใช้เป็น fallback เฉพาะเครื่องที่ยังไม่มี LOT เท่านั้น
@@ -763,10 +890,13 @@ function fillLotIds(rows) {
 }
 
 async function fetchQrHistory(machineId, range, limit, offset, startStr, endStr) {
+  // ★ หาช่วงเวลาก่อนขอ connection — เพดานเวลาขึ้นกับว่าขอย้อนหลังกี่วัน
+  const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
   const p = await getPool()
   const conn = await p.getConnection()
+  /* ★ [FIX] เพดานเวลาฝั่ง API — กัน query ช่วงยาวจอง connection ค้างจนเต็ม pool */
+  conn.callTimeout = apiTimeoutFor('qr-history', r)
   try {
-    const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
     var binds = { start_date: r.start, end_date: r.end, machine1: machineId, machine2: machineId }
     var limitClause = ''
     if (limit && limit > 0) {
@@ -775,21 +905,25 @@ async function fetchQrHistory(machineId, range, limit, offset, startStr, endStr)
     }
     const sql = `
       SELECT * FROM (
-        SELECT
-          COALESCE(SUB_EQP_ID, MAIN_EQP_ID) AS MACHINE_ID,
-          NVL(LOT_ID, '(no lot)') AS LOT_ID,
-          PANEL_ID,
-          DATE_TIME,
-          CASE WHEN ${SQL_IS_UNREAD} THEN 0 ELSE 1 END AS IS_READ,
-${SQL_PANEL_FLAGS}
-        FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
-        WHERE DATE_TIME >= :start_date
-          AND DATE_TIME <= :end_date
-          /* ★ [FIX] ย้าย filter เครื่องเข้ามาใน subquery
-             เดิมกรองอยู่ข้างนอก → inner query สแกน panel ของ "ทุกเครื่อง" ทั้งช่วงเวลา
-             แล้วค่อย sort ทำให้วันย้อนหลัง (ข้อมูลเต็ม 24 ชม.) ช้าจนหมดเวลา */
-          AND (SUB_EQP_ID = :machine1 OR (SUB_EQP_ID IS NULL AND MAIN_EQP_ID = :machine2))
-          AND ${SQL_IS_PANEL_EVENT}
+        SELECT MACHINE_ID, LOT_ID,
+               /* ★ PANEL_TXT = 100 ตัวแรกของ PANEL_ID ที่ชั้นในแปลงเป็น VARCHAR2 ไว้แล้ว
+                  panel id จริงสั้นกว่านี้มาก และตรงนี้เอาไปโชว์เฉย ๆ จึงไม่ต้องลาก CLOB ต่อ */
+               PANEL_TXT AS PANEL_ID, DATE_TIME,
+               1 - IS_UNREAD AS IS_READ,
+               NORM_PANEL, IS_UNREAD, IS_REAL
+        FROM (
+${panelBaseSql([
+        ['COALESCE(SUB_EQP_ID, MAIN_EQP_ID)', 'MACHINE_ID'],
+        ["NVL(LOT_ID, '(no lot)')", 'LOT_ID'],
+        ['DATE_TIME', 'DATE_TIME']
+      ], `DATE_TIME >= :start_date
+              AND DATE_TIME <= :end_date
+              /* ★ [FIX] ย้าย filter เครื่องเข้ามาใน subquery
+                 เดิมกรองอยู่ข้างนอก → inner query สแกน panel ของ "ทุกเครื่อง" ทั้งช่วงเวลา
+                 แล้วค่อย sort ทำให้วันย้อนหลัง (ข้อมูลเต็ม 24 ชม.) ช้าจนหมดเวลา */
+              AND (SUB_EQP_ID = :machine1 OR (SUB_EQP_ID IS NULL AND MAIN_EQP_ID = :machine2))
+              AND ${SQL_IS_PANEL_EVENT}`, true)}
+        )
         ORDER BY DATE_TIME DESC
       )
       WHERE 1 = 1
@@ -858,34 +992,40 @@ ${SQL_PANEL_FLAGS}
 
 // ─── SQL: % QR หลายวันของเครื่องเดียว (ตารางใน popup) ───────
 async function fetchQrDaily(machineId, range, startStr, endStr) {
+  // ★ หาช่วงเวลาก่อนขอ connection — เพดานเวลาขึ้นกับว่าขอย้อนหลังกี่วัน
+  const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
   const p = await getPool()
   const conn = await p.getConnection()
+  /* ★ [FIX] เพดานเวลาฝั่ง API — กัน query ช่วงยาวจอง connection ค้างจนเต็ม pool */
+  conn.callTimeout = apiTimeoutFor('qr-daily', r)
   try {
-    const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
     const sql = `
-      SELECT * FROM (
-        SELECT
-          QR_DAY,
-          MID,
-          ${SQL_COUNT_OK} + ${SQL_COUNT_ERR} AS TOTAL_CNT,
-          ${SQL_COUNT_ERR} AS ERR_CNT,
-          ${SQL_COUNT_OK}  AS OK_CNT
-        FROM (
-          SELECT
-            TRUNC(DATE_TIME) AS QR_DAY,
-            COALESCE(SUB_EQP_ID, MAIN_EQP_ID) AS MID,
-${SQL_PANEL_FLAGS}
-          FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
-          WHERE DATE_TIME >= :1
-            AND DATE_TIME <= :2
-            AND ${SQL_IS_PANEL_EVENT}
-        )
-        GROUP BY QR_DAY, MID
+      SELECT
+        QR_DAY,
+        MID,
+        ${SQL_COUNT_OK} + ${SQL_COUNT_ERR} AS TOTAL_CNT,
+        ${SQL_COUNT_ERR} AS ERR_CNT,
+        ${SQL_COUNT_OK}  AS OK_CNT
+      FROM (
+${panelBaseSql([
+        ['TRUNC(DATE_TIME)', 'QR_DAY'],
+        ['COALESCE(SUB_EQP_ID, MAIN_EQP_ID)', 'MID']
+      ], `DATE_TIME >= :start_date
+              AND DATE_TIME <= :end_date
+              /* ★ [PERF] filter เครื่องต้องอยู่ "ในสุด"
+                 ของเดิมกรอง MID ไว้นอก GROUP BY → ต้อง normalize CLOB ของ
+                 ทุกเครื่องทั้งช่วง แล้วค่อยทิ้งทุกเครื่องยกเว้นเครื่องเดียว
+                 ช่วง 7/30 วันจึงช้าจนหมดเวลา ทั้งที่ต้องการข้อมูลเครื่องเดียว */
+              AND (SUB_EQP_ID = :machine1 OR (SUB_EQP_ID IS NULL AND MAIN_EQP_ID = :machine2))
+              AND ${SQL_IS_PANEL_EVENT}`)}
       )
-      WHERE MID = :3
+      GROUP BY QR_DAY, MID
       ORDER BY QR_DAY DESC
     `
-    const result = await conn.execute(sql, [r.start, r.end, machineId], { outFormat: oracledb.OUT_FORMAT_OBJECT })
+    const result = await conn.execute(sql, {
+      start_date: r.start, end_date: r.end,
+      machine1: machineId, machine2: machineId
+    }, { outFormat: oracledb.OUT_FORMAT_OBJECT })
     var days = (result.rows || []).map(function(r) {
       var total = r.TOTAL_CNT || 0
       var ok = r.OK_CNT || 0
@@ -985,6 +1125,8 @@ async function fetchStatusHistory(machineId, range, startStr, endStr, limit, off
   var events = latestEvent ? [latestEvent] : []
   const p = await getPool()
   const conn = await p.getConnection()
+  /* ★ [FIX] เพดานเวลาฝั่ง API — กัน query ช่วงยาวจอง connection ค้างจนเต็ม pool */
+  conn.callTimeout = apiTimeoutFor('status-history', r)
   try {
     if (!isLiveRange) {
       const evLimit = limit != null ? parseInt(limit, 10) : 50
@@ -1128,11 +1270,52 @@ async function fetchStatusHistory(machineId, range, startStr, endStr, limit, off
 }
 
 
+/* ★ [PERF] cache ผลสรุป %QR
+   ช่วงยาว (7/30 วัน) ต่อให้ query เร็วขึ้นแล้วก็ยังกินเวลาหลายวินาที และหน้า report
+   มี auto-refresh + ผู้ใช้กดสลับช่วงไปมา ทุกครั้งเดิมยิง query ใหม่หมด
+   - ช่วงที่ "จบไปแล้ว" (end < ตอนนี้) ข้อมูลนิ่งแล้ว เก็บได้ยาว
+   - ช่วงที่มีวันนี้อยู่ด้วย ข้อมูลยังวิ่ง เก็บสั้น ๆ พอกัน refresh ซ้ำ */
+const QR_SUMMARY_CACHE_MAX = 50
+const QR_SUMMARY_TTL_LIVE_MS   = 60 * 1000       // ช่วงที่ยังมีวันนี้อยู่
+const QR_SUMMARY_TTL_CLOSED_MS = 30 * 60 * 1000  // ช่วงที่จบไปแล้ว
+const qrSummaryCache = new Map()
+
+function getQrSummaryCache(key) {
+  const entry = qrSummaryCache.get(key)
+  if (!entry) return null
+  if (Date.now() > entry.expiresAt) {
+    qrSummaryCache.delete(key)
+    return null
+  }
+  return entry.data
+}
+
+function setQrSummaryCache(key, data, ttlMs) {
+  if (qrSummaryCache.size >= QR_SUMMARY_CACHE_MAX) {
+    const firstKey = qrSummaryCache.keys().next().value
+    if (firstKey) qrSummaryCache.delete(firstKey)
+  }
+  qrSummaryCache.set(key, { data: data, expiresAt: Date.now() + ttlMs })
+}
+
 async function fetchQrSummary(range, startStr, endStr) {
+  // ★ ต้องรู้ช่วงเวลาก่อน ถึงจะเช็ค cache ได้ — key คือช่วงจริง ไม่ใช่ชื่อ range
+  //   'week' ของวันนี้กับของเมื่อวานคนละช่วงกัน ส่วน custom ที่บังเอิญตรงกับ week ใช้ผลร่วมกันได้เลย
+  const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
+  const cacheKey = r.start.getTime() + '|' + r.end.getTime()
+  const cached = getQrSummaryCache(cacheKey)
+  if (cached) {
+    console.log('[QrSummary] cache hit: ' + r.label)
+    return { ...cached, cached: true }
+  }
+
   const p = await getPool()
   const conn = await p.getConnection()
+  /* ★ [FIX] ให้ Oracle ยกเลิกเองถ้าเกินเวลา — ไม่งั้น query ช่วงยาวจะจอง connection
+     ค้างไว้จนครบ poolMax แล้ว API เส้นอื่น (รวมทั้ง poll) พลอยหมดเวลาตามไปด้วย */
+  conn.callTimeout = apiTimeoutFor('qr-summary', r)
   try {
-    const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
+    const t0 = Date.now()
     const sql = `
       SELECT
         MACHINE_ID,
@@ -1141,14 +1324,12 @@ async function fetchQrSummary(range, startStr, endStr) {
         ${SQL_COUNT_ERR} AS ERR_CNT,
         ${SQL_COUNT_OK}  AS OK_CNT
       FROM (
-        SELECT
-          COALESCE(SUB_EQP_ID, MAIN_EQP_ID) AS MACHINE_ID,
-          SUB_EQP_NAME AS MACHINE_NAME,
-${SQL_PANEL_FLAGS}
-        FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
-        WHERE DATE_TIME >= :1
-          AND DATE_TIME <= :2
-          AND ${SQL_IS_PANEL_EVENT}
+${panelBaseSql([
+        ['COALESCE(SUB_EQP_ID, MAIN_EQP_ID)', 'MACHINE_ID'],
+        ['SUB_EQP_NAME', 'MACHINE_NAME']
+      ], `DATE_TIME >= :1
+              AND DATE_TIME <= :2
+              AND ${SQL_IS_PANEL_EVENT}`)}
       )
       GROUP BY MACHINE_ID
       ORDER BY TOTAL_CNT DESC
@@ -1170,7 +1351,8 @@ ${SQL_PANEL_FLAGS}
     var grandTotal = byMachine.reduce(function(s, m) { return s + m.total }, 0)
     var grandOk = byMachine.reduce(function(s, m) { return s + m.ok }, 0)
     var grandErr = byMachine.reduce(function(s, m) { return s + m.err }, 0)
-    return {
+    console.log('[QrSummary] ' + r.label + ': ' + byMachine.length + ' machines, ' + (Date.now() - t0) + 'ms')
+    const out = {
       range: range,
       label: r.label,
       overall: {
@@ -1182,6 +1364,8 @@ ${SQL_PANEL_FLAGS}
       },
       by_machine: byMachine
     }
+    setQrSummaryCache(cacheKey, out, r.end.getTime() < Date.now() ? QR_SUMMARY_TTL_CLOSED_MS : QR_SUMMARY_TTL_LIVE_MS)
+    return { ...out, cached: false }
   } finally {
     await conn.close()
   }
@@ -1225,6 +1409,8 @@ async function fetchMachineHistory(machineId, dateStr) {
 
   const p = await getPool()
   const conn = await p.getConnection()
+  /* ★ [FIX] เพดานเวลาฝั่ง API — กัน query ช่วงยาวจอง connection ค้างจนเต็ม pool */
+  conn.callTimeout = apiTimeoutForDays('machine-history', 1)
   try {
     const r = getDateRangeFromParams(dateStr, dateStr)
     const sql = `
@@ -1246,16 +1432,14 @@ async function fetchMachineHistory(machineId, dateStr) {
       ),
       -- ★ [FIX] normalize + คัด dummy/jig ครั้งเดียว (กฎเดียวกับ fetchLatestMachineStates)
       panel_base AS (
-        SELECT
-          COALESCE(SUB_EQP_ID, MAIN_EQP_ID) AS MACHINE_ID,
-          LOT_ID,
-          DATE_TIME,
-${SQL_PANEL_FLAGS}
-        FROM PAEAPTRACE.EAP_EQP_EVENT_PNL_PNL
-        WHERE DATE_TIME >= :ps_start
-          AND DATE_TIME <= :ps_end
-          AND (SUB_EQP_ID = :ps_machine1 OR (SUB_EQP_ID IS NULL AND MAIN_EQP_ID = :ps_machine2))
-          AND ${SQL_IS_PANEL_EVENT}
+${panelBaseSql([
+        ['COALESCE(SUB_EQP_ID, MAIN_EQP_ID)', 'MACHINE_ID'],
+        ['LOT_ID', 'LOT_ID'],
+        ['DATE_TIME', 'DATE_TIME']
+      ], `DATE_TIME >= :ps_start
+              AND DATE_TIME <= :ps_end
+              AND (SUB_EQP_ID = :ps_machine1 OR (SUB_EQP_ID IS NULL AND MAIN_EQP_ID = :ps_machine2))
+              AND ${SQL_IS_PANEL_EVENT}`)}
       ),
       panel_stats AS (
         SELECT
@@ -1923,6 +2107,16 @@ const app = http.createServer(async (req, res) => {
         /* ★ เป้าหมาย %QR — frontend ใช้เป็นเกณฑ์สีเดียวกันทั้งหน้าจอ
            (ของเดิม frontend hardcode ไว้คนละค่าในแต่ละที่: 100 บ้าง 95 บ้าง) */
         qr_target_pct: QR_TARGET_PCT,
+        /* ★ เพดานเวลาฝั่ง server แยกตามความยาวช่วง — frontend เอาไปตั้งเวลารอของตัวเอง
+           ให้ยาวกว่านิดหน่อย จะได้เห็น error จริงจาก server แทนที่จะถูกฝั่ง browser ตัดไปก่อน */
+        api_timeouts: {
+          short_ms: API_TIMEOUT_MS,
+          week_ms: API_TIMEOUT_WEEK_MS,
+          month_ms: API_TIMEOUT_MONTH_MS,
+          max_ms: maxApiTimeoutMs(),
+          short_max_days: API_TIMEOUT_SHORT_MAX_DAYS,
+          week_max_days: API_TIMEOUT_WEEK_MAX_DAYS,
+        },
       })
     } catch (err) {
       console.error('[API] /api/layout error:', err.message)
@@ -2067,7 +2261,15 @@ async function main() {
   /* ★ พิมพ์ช่วงเวลาที่ query ใช้จริง ไม่ใช่แค่ที่ตั้งไว้ — บั๊กรอบก่อนคือ banner
      ประกาศ "Lookback: 15 min" แต่ SQL ฮาร์ดโค้ด 24 ชม. ไว้ ไม่มีทางรู้จากหน้าจอเลย */
   console.log(`[Info] Poll: every ${POLL_INTERVAL_MS}ms | Lookback: ${POLL_MINUTES} min | ` +
-              `PanelStats: ${PANEL_STATS_MINUTES} min | timeout: ${POLL_TIMEOUT_MS}ms`)
+              `PanelStats: ${PANEL_STATS_MINUTES} min | poll timeout: ${POLL_TIMEOUT_MS}ms`)
+  /* ★ เพดานเวลา API แยกตามความยาวช่วง — พิมพ์ออกมาให้เห็น จะได้รู้ว่าค่าใน .env ติดจริงไหม */
+  console.log(`[Info] API timeout: <=${API_TIMEOUT_SHORT_MAX_DAYS}d ${API_TIMEOUT_MS}ms | ` +
+              `<=${API_TIMEOUT_WEEK_MAX_DAYS}d ${API_TIMEOUT_WEEK_MS}ms | longer ${API_TIMEOUT_MONTH_MS}ms | ` +
+              `pool queue: ${QUEUE_TIMEOUT_MS}ms` +
+              Object.keys(API_TIMEOUT_BY_ENDPOINT)
+                .filter(function(k) { return API_TIMEOUT_BY_ENDPOINT[k] > 0 })
+                .map(function(k) { return ` | ${k}: ${API_TIMEOUT_BY_ENDPOINT[k]}ms (override)` })
+                .join(''))
   /* ★ [FIX] ลบ QR log เก่ากว่า 30 วัน — ของเดิมรันแค่ครั้งเดียวตอน start
      server ที่เปิดทิ้งไว้เป็นเดือน ๆ จะไม่เคยลบไฟล์เก่าเลย แม้ตั้ง retention ไว้แล้ว
      (ไฟล์วันที่งานเยอะ ~580 KB/วัน → ปีนึงราว 200 MB) */

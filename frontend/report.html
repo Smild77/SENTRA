@@ -358,7 +358,9 @@ function setupAutoRefresh(){
   var on = document.getElementById('autoRefresh').checked;
   /* ย้อนหลังไม่ขยับแล้ว รีเฟรชทิ้งเปล่า ๆ — เปิดเฉพาะช่วงที่มีวันนี้อยู่ด้วย */
   if (on && (state.range === 'today' || state.range === 'week' || state.range === 'month')) {
-    autoTimer = setInterval(function(){ loadData(true); }, 60000);
+    /* ★ ช่วงยาวใช้เวลา query นานกว่ามาก รีเฟรชทุกนาทีคือยิงซ้อนแทบจะตลอดเวลา
+       และตัวเลขรวม 7/30 วันก็แทบไม่ขยับในหนึ่งนาทีอยู่แล้ว */
+    autoTimer = setInterval(function(){ loadData(true); }, isLongRange() ? 300000 : 60000);
   }
 }
 function refresh(){ loadData(); }
@@ -397,6 +399,8 @@ function loadLayout(){
     .then(function(data){
       MACHINES_DB = (data && data.machines) || {};
       if (data && data.qr_target_pct != null) QR_TARGET_PCT = parseFloat(data.qr_target_pct) || QR_TARGET_PCT;
+      /* ★ เพดานเวลาฝั่ง server (แยกตามความยาวช่วง) — เอามาตั้งเวลารอของฝั่งเราให้สอดคล้องกัน */
+      if (data && data.api_timeouts) API_TIMEOUTS = data.api_timeouts;
       MACHINE_META = {};
       Object.keys(MACHINES_DB).forEach(function(f){
         Object.keys(MACHINES_DB[f] || {}).forEach(function(fl){
@@ -416,13 +420,61 @@ function qrUrl(){
   return API + '/api/qr-summary?range=' + encodeURIComponent(state.range);
 }
 
+/* ★ [FIX] เดิมตั้งไว้ค่าเดียว 120 วิ ทุกช่วง — 7 วันพอดี แต่ 30 วันโดนตัดก่อนทุกที
+   ตอนนี้แยกตามความยาวช่วง และยึดค่าที่ server บอกมาทาง /api/layout เป็นหลัก
+   (ปรับที่ .env ฝั่ง server ที่เดียว ฝั่งนี้ตามให้เอง) ค่าล่างคือ fallback ตอนที่ยังโหลดผังไม่เสร็จ */
+var API_TIMEOUTS = {
+  short_ms: 90000,       // ≤ 2 วัน
+  week_ms: 180000,       // ≤ 7 วัน
+  month_ms: 300000,      // ยาวกว่า 7 วัน
+  short_max_days: 2,
+  week_max_days: 7
+};
+// ★ เผื่อเวลาให้ฝั่งเรามากกว่า server เสมอ จะได้เห็น error จริงจาก server แทนที่จะถูกเราตัดก่อน
+var FETCH_TIMEOUT_MARGIN_MS = 15000;
+
+// ★ ช่วงที่เลือกอยู่ = กี่วัน (custom คิดจากวันที่จริงที่ผู้ใช้เลือก)
+function selectedDays(){
+  if (state.range === 'today' || state.range === 'yesterday') return 1;
+  if (state.range === 'week') return 7;
+  if (state.range === 'month') return 30;
+  if (state.range === 'custom' && state.start && state.end) {
+    var ms = new Date(state.end + 'T23:59:59').getTime() - new Date(state.start + 'T00:00:00').getTime();
+    if (isFinite(ms) && ms > 0) return Math.max(1, Math.ceil(ms / 86400000));
+  }
+  return 1;
+}
+
+// ★ เวลารอสูงสุดของรอบโหลดนี้ = เพดานฝั่ง server ของช่วงนี้ + เผื่อเวลาส่งข้อมูล
+function fetchTimeoutMs(){
+  var d = selectedDays();
+  var serverMs = d <= (API_TIMEOUTS.short_max_days || 2) ? API_TIMEOUTS.short_ms
+               : d <= (API_TIMEOUTS.week_max_days || 7) ? API_TIMEOUTS.week_ms
+               : API_TIMEOUTS.month_ms;
+  return (parseInt(serverMs, 10) || 90000) + FETCH_TIMEOUT_MARGIN_MS;
+}
+
+function isLongRange(){
+  return state.range === 'week' || state.range === 'month' || state.range === 'custom';
+}
+
 function loadData(silent){
   if (loading) return;
   loading = true;
   var btn = document.getElementById('refreshBtn');
   btn.disabled = true;
-  if (!silent) renderSkeleton();
-  fetch(qrUrl())
+  if (!silent) renderSkeleton(isLongRange() ? t('rpLoadingLong') : '');
+
+  /* ★ ของเดิมไม่มีเพดานเวลาเลย ช่วง 7/30 วันจึงค้างเป็นนาทีโดยไม่บอกอะไรผู้ใช้
+     จนดูเหมือนหน้าจอแฮงก์ ตอนนี้ยกเลิกเองแล้วขึ้นข้อความที่บอกได้ว่าทำอะไรต่อ */
+  var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var timedOut = false;
+  var timer = setTimeout(function(){
+    timedOut = true;
+    if (ctrl) ctrl.abort();
+  }, fetchTimeoutMs());
+
+  fetch(qrUrl(), ctrl ? { signal: ctrl.signal } : undefined)
     .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(data){
       if (data && data.error) throw new Error(data.error);
@@ -458,12 +510,16 @@ function loadData(silent){
       document.getElementById('chartSub').textContent = '';
       var chartEl = document.getElementById('chart');
       chartEl.className = 'chart msg-only';
+      var head = timedOut ? t('rpTimeout') : t('rpLoadFail');
+      var detail = timedOut
+        ? (t('rpTimeoutHint') + ' (' + Math.round(fetchTimeoutMs() / 1000) + 's)')
+        : e.message;
       chartEl.innerHTML =
-        '<div class="msg error">' + esc(t('rpLoadFail')) + '<br><span style="font-size:11px">' + esc(e.message) + '</span></div>';
+        '<div class="msg error">' + esc(head) + '<br><span style="font-size:11px">' + esc(detail) + '</span></div>';
       document.getElementById('kpis').innerHTML = '';
       document.getElementById('legend').innerHTML = '';
     })
-    .then(function(){ loading = false; btn.disabled = false; });
+    .then(function(){ clearTimeout(timer); loading = false; btn.disabled = false; });
 }
 
 /* ─── filtering / sorting ─── */
@@ -497,9 +553,9 @@ function metricValue(r){
 }
 
 /* ─── render ─── */
-function renderSkeleton(){
+function renderSkeleton(note){
   document.getElementById('chart').className = 'chart msg-only';
-  var h = '';
+  var h = note ? '<div class="msg" style="padding:6px 0 12px">' + esc(note) + '</div>' : '';
   for (var i = 0; i < 10; i++) h += '<div class="skel"></div>';
   document.getElementById('chart').innerHTML = h;
 }
@@ -617,7 +673,8 @@ function renderChart(list, totalCount){
       + (r.zone ? ' · ' + r.zone : '')
       + '\n' + t('rpKpiPanels') + ': ' + nf(r.total)
       + '\n' + t('rpLegendOk') + ': ' + nf(r.ok) + '  ' + t('rpLegendErr') + ': ' + nf(r.err)
-      + '\n% QR: ' + r.pct.toFixed(1) + '%';
+      + '\n% QR: ' + r.pct.toFixed(1) + '%'
+      + (r.onMap ? '' : '\n' + t('rpNotOnMap'));
     return '<button class="row' + (r.total === 0 ? ' zero' : '') + '" title="' + esc(tip) + '"'
       + ' onclick="openMachine(\'' + esc(r.id).replace(/'/g, "\\'") + '\')">'
       + '<span class="row-rank">' + (i + 1) + '</span>'
@@ -632,8 +689,9 @@ function renderChart(list, totalCount){
 
 /* ─── actions ─── */
 function openMachine(id){
-  var meta = MACHINE_META[id];
-  if (!meta) { alert(t('rpNotOnMap')); return; }
+  /* ★ [FIX] เดิมเครื่องที่ยังไม่ได้วางบนผังจะกดไม่ได้เลย — เด้ง alert แล้วจบ
+     ทั้งที่ข้อมูลย้อนหลังของมันมีอยู่ใน DB ครบ (หน้านี้เอามาโชว์อยู่แล้ว)
+     ตอนนี้เปิดได้ทุกเครื่อง ฝั่ง dashboard จะเปิดแผงข้อมูลให้ แม้ไม่มีหมุดบนแผนที่ */
   var url = 'index.html?machine=' + encodeURIComponent(id) + '&lang=' + curLang;
   /* ★ หน้านี้ถูกเปิดเป็นแท็บใหม่ ถ้าเด้งทับตัวเองกราฟจะหาย
      → ยิงไปที่แท็บชื่อ 'sentra-dashboard' คลิกเครื่องถัดไปก็ใช้แท็บเดิมนั้นซ้ำ ไม่งอกเรื่อย ๆ */

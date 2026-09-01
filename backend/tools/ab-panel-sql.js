@@ -13,10 +13,17 @@
   Variant B computes each of those exactly once in an inner block, then reuses
   the plain VARCHAR2 result. Same inputs, same output - just not recomputed.
 
+  Variant B is what sentra-server.js SHIPS today (panelBaseSql()). Variant A is
+  kept here as the old shape so the two can still be compared side by side.
+
   This tool runs A and B on the same window and checks BOTH:
       - is B actually faster
       - does B return byte-identical numbers to A (this is the part that
         matters: a faster query that changes %QR is worthless)
+
+  Run this on a machine that can reach the DB before trusting the new numbers.
+  Worth running at 1440 (one day) and again at 10080 (seven days), because the
+  7-day report is where the old shape ran out of time.
 
   Read-only. Usage:  node tools/ab-panel-sql.js [windowMinutes]
   Keep output pure ASCII - cmd.exe on this machine runs code page 950.

@@ -256,8 +256,12 @@ window.I18N_EN = {
   rpLegendErr:'Error',
   rpUpdated:'Updated',
   rpLoadFail:'Failed to load data',
+  rpLoadingLong:'Longer ranges take more time to load, please wait…',
+  rpTimeout:'Loading took too long',
+  rpTimeoutHint:'Try a shorter range, or press refresh again (the next attempt is faster because the result is cached).',
   rpNoData:'— No data for the current filters —',
   rpClickHint:'Click a bar to open that machine on the map',
   rpAxisFrom:'axis starts at',
   rpNotOnMap:'This machine has no position on the layout yet',
+  miNotOnLayout:'Not on layout',
 };
