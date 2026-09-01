@@ -125,21 +125,13 @@ const STALE_MINUTES = posInt(process.env.STALE_MINUTES, POLL_MINUTES)
 const POLL_TIMEOUT_MS = posInt(process.env.POLL_TIMEOUT_MS, 15000)
 // ★ query ที่ใช้เกินค่านี้จะถูก log ไว้ — เตือนก่อนที่มันจะโตจนชน POLL_TIMEOUT_MS
 const SLOW_QUERY_WARN_MS = posInt(process.env.SLOW_QUERY_WARN_MS, Math.round(POLL_TIMEOUT_MS / 3))
-/* ★ เพดานเวลาของ query ฝั่ง API — คนละตัวกับ POLL_TIMEOUT_MS
-   poll ต้องจบเร็วเพราะยิงทุก 3 วิ ส่วน API ผู้ใช้กดเองครั้งเดียวและอาจขอช่วง 7/30 วัน
-   จึงให้เวลามากกว่าได้ แต่ต้อง "มีเพดาน" ไม่งั้น query ยาวจะจอง connection ค้างจนเต็ม pool
-   แล้ว poll กับ API เส้นอื่นพลอยตายตาม (นี่คืออาการ time out ที่เห็นตอนเลือก 7 วัน) */
-const API_TIMEOUT_MS = posInt(process.env.API_TIMEOUT_MS, 90000)
-/* ★ [FIX] ค่าเดียวใช้ไม่พอ — 90 วิพอสำหรับ 7 วัน แต่ 30 วันข้อมูลเยอะกว่าหลายเท่า
-   จึงชน callTimeout แล้วเด้ง "time out" ทุกครั้ง ตอนนี้แยกเพดานตาม "ความยาวช่วงที่ขอ"
-   และปรับได้ทาง .env ทีละตัวโดยไม่ต้องแก้โค้ด */
-const API_TIMEOUT_WEEK_MS  = posInt(process.env.API_TIMEOUT_WEEK_MS, 180000)   // ช่วง 3–7 วัน
-const API_TIMEOUT_MONTH_MS = posInt(process.env.API_TIMEOUT_MONTH_MS, 300000)  // ยาวกว่า 7 วัน (เช่น 30 วัน)
-// ★ เส้นแบ่งว่าช่วงกี่วันนับเป็น "สั้น" / "สัปดาห์" / "ยาว"
+// เพดานเวลา query ฝั่ง API — แยกตามความยาวช่วงที่ขอ ปรับได้ทาง .env
+const API_TIMEOUT_MS = posInt(process.env.API_TIMEOUT_MS, 90000)               // <= 2 วัน
+const API_TIMEOUT_WEEK_MS  = posInt(process.env.API_TIMEOUT_WEEK_MS, 180000)   // 3–7 วัน
+const API_TIMEOUT_MONTH_MS = posInt(process.env.API_TIMEOUT_MONTH_MS, 300000)  // ยาวกว่า 7 วัน
 const API_TIMEOUT_SHORT_MAX_DAYS = posInt(process.env.API_TIMEOUT_SHORT_MAX_DAYS, 2)
 const API_TIMEOUT_WEEK_MAX_DAYS  = posInt(process.env.API_TIMEOUT_WEEK_MAX_DAYS, 7)
-/* ★ override ราย API — ใส่เมื่อเส้นไหนหนักกว่าเพื่อนจริง ๆ
-   0 หรือไม่ตั้ง = คิดตามความยาวช่วงตามปกติ (ชื่อ key ตรงกับ path จะได้ไล่ log ง่าย) */
+// override ราย endpoint (0 = คิดตามความยาวช่วง)
 const API_TIMEOUT_BY_ENDPOINT = {
   'qr-summary':      posInt(process.env.API_TIMEOUT_QR_SUMMARY_MS, 0),
   'qr-history':      posInt(process.env.API_TIMEOUT_QR_HISTORY_MS, 0),
@@ -149,19 +141,15 @@ const API_TIMEOUT_BY_ENDPOINT = {
   'lot-report':      posInt(process.env.API_TIMEOUT_LOT_REPORT_MS, 0),
   'machines':        posInt(process.env.API_TIMEOUT_MACHINES_MS, 0),
 }
-/* ★ เวลารอ connection ว่างจาก pool — ต้องยาวกว่าเดิม เพราะ query ช่วง 30 วัน
-   จอง connection ได้นานเป็นนาที ถ้าคิวสั้นไปเส้นอื่นจะเด้ง NJS-040 (queue timeout)
-   ทั้งที่ DB ยังไม่ได้ช้าเลย */
+// query ช่วงยาวจอง connection นานเป็นนาที — คิวสั้นไปเส้นอื่นจะเด้ง NJS-040
 const QUEUE_TIMEOUT_MS = posInt(process.env.ORACLE_QUEUE_TIMEOUT_MS, Math.max(POLL_TIMEOUT_MS, 30000))
 
-// ★ จำนวนวันของช่วงที่ขอ (ปัดขึ้น อย่างน้อย 1)
 function rangeDays(start, end) {
   if (!(start instanceof Date) || !(end instanceof Date)) return 1
   const ms = end.getTime() - start.getTime()
   if (!Number.isFinite(ms) || ms <= 0) return 1
   return Math.max(1, Math.ceil(ms / 86400000))
 }
-// ★ เพดานเวลาของ API เส้นนั้น: override ราย endpoint มาก่อน ถ้าไม่มีก็ดูความยาวช่วง
 function apiTimeoutForDays(endpoint, days) {
   const override = API_TIMEOUT_BY_ENDPOINT[endpoint] || 0
   if (override > 0) return override
@@ -170,11 +158,10 @@ function apiTimeoutForDays(endpoint, days) {
   if (d <= API_TIMEOUT_WEEK_MAX_DAYS) return API_TIMEOUT_WEEK_MS
   return API_TIMEOUT_MONTH_MS
 }
-// r = { start, end } หรือ null สำหรับ query ที่ไม่มีช่วงเวลา
+// r = null สำหรับ query ที่ไม่มีช่วงเวลา
 function apiTimeoutFor(endpoint, r) {
   return apiTimeoutForDays(endpoint, r ? rangeDays(r.start, r.end) : 1)
 }
-// ★ เพดานที่ยาวที่สุดที่เป็นไปได้ — frontend ใช้ตัดสินว่าจะรอสูงสุดเท่าไร
 function maxApiTimeoutMs() {
   var vals = [API_TIMEOUT_MS, API_TIMEOUT_WEEK_MS, API_TIMEOUT_MONTH_MS]
   Object.keys(API_TIMEOUT_BY_ENDPOINT).forEach(function(k) {
@@ -890,7 +877,6 @@ function fillLotIds(rows) {
 }
 
 async function fetchQrHistory(machineId, range, limit, offset, startStr, endStr) {
-  // ★ หาช่วงเวลาก่อนขอ connection — เพดานเวลาขึ้นกับว่าขอย้อนหลังกี่วัน
   const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
   const p = await getPool()
   const conn = await p.getConnection()
@@ -992,7 +978,6 @@ ${panelBaseSql([
 
 // ─── SQL: % QR หลายวันของเครื่องเดียว (ตารางใน popup) ───────
 async function fetchQrDaily(machineId, range, startStr, endStr) {
-  // ★ หาช่วงเวลาก่อนขอ connection — เพดานเวลาขึ้นกับว่าขอย้อนหลังกี่วัน
   const r = startStr || endStr ? getDateRangeFromParams(startStr, endStr) : getDateRange(range)
   const p = await getPool()
   const conn = await p.getConnection()
@@ -2107,8 +2092,7 @@ const app = http.createServer(async (req, res) => {
         /* ★ เป้าหมาย %QR — frontend ใช้เป็นเกณฑ์สีเดียวกันทั้งหน้าจอ
            (ของเดิม frontend hardcode ไว้คนละค่าในแต่ละที่: 100 บ้าง 95 บ้าง) */
         qr_target_pct: QR_TARGET_PCT,
-        /* ★ เพดานเวลาฝั่ง server แยกตามความยาวช่วง — frontend เอาไปตั้งเวลารอของตัวเอง
-           ให้ยาวกว่านิดหน่อย จะได้เห็น error จริงจาก server แทนที่จะถูกฝั่ง browser ตัดไปก่อน */
+        // frontend เอาไปตั้งเวลารอของตัวเองให้ยาวกว่านี้เล็กน้อย
         api_timeouts: {
           short_ms: API_TIMEOUT_MS,
           week_ms: API_TIMEOUT_WEEK_MS,
@@ -2262,7 +2246,6 @@ async function main() {
      ประกาศ "Lookback: 15 min" แต่ SQL ฮาร์ดโค้ด 24 ชม. ไว้ ไม่มีทางรู้จากหน้าจอเลย */
   console.log(`[Info] Poll: every ${POLL_INTERVAL_MS}ms | Lookback: ${POLL_MINUTES} min | ` +
               `PanelStats: ${PANEL_STATS_MINUTES} min | poll timeout: ${POLL_TIMEOUT_MS}ms`)
-  /* ★ เพดานเวลา API แยกตามความยาวช่วง — พิมพ์ออกมาให้เห็น จะได้รู้ว่าค่าใน .env ติดจริงไหม */
   console.log(`[Info] API timeout: <=${API_TIMEOUT_SHORT_MAX_DAYS}d ${API_TIMEOUT_MS}ms | ` +
               `<=${API_TIMEOUT_WEEK_MAX_DAYS}d ${API_TIMEOUT_WEEK_MS}ms | longer ${API_TIMEOUT_MONTH_MS}ms | ` +
               `pool queue: ${QUEUE_TIMEOUT_MS}ms` +

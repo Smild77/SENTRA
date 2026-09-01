@@ -358,8 +358,7 @@ function setupAutoRefresh(){
   var on = document.getElementById('autoRefresh').checked;
   /* ย้อนหลังไม่ขยับแล้ว รีเฟรชทิ้งเปล่า ๆ — เปิดเฉพาะช่วงที่มีวันนี้อยู่ด้วย */
   if (on && (state.range === 'today' || state.range === 'week' || state.range === 'month')) {
-    /* ★ ช่วงยาวใช้เวลา query นานกว่ามาก รีเฟรชทุกนาทีคือยิงซ้อนแทบจะตลอดเวลา
-       และตัวเลขรวม 7/30 วันก็แทบไม่ขยับในหนึ่งนาทีอยู่แล้ว */
+    /* ช่วงยาว query นานกว่ามาก รีเฟรชทุกนาที = ยิงซ้อน */
     autoTimer = setInterval(function(){ loadData(true); }, isLongRange() ? 300000 : 60000);
   }
 }
@@ -399,7 +398,6 @@ function loadLayout(){
     .then(function(data){
       MACHINES_DB = (data && data.machines) || {};
       if (data && data.qr_target_pct != null) QR_TARGET_PCT = parseFloat(data.qr_target_pct) || QR_TARGET_PCT;
-      /* ★ เพดานเวลาฝั่ง server (แยกตามความยาวช่วง) — เอามาตั้งเวลารอของฝั่งเราให้สอดคล้องกัน */
       if (data && data.api_timeouts) API_TIMEOUTS = data.api_timeouts;
       MACHINE_META = {};
       Object.keys(MACHINES_DB).forEach(function(f){
@@ -420,20 +418,17 @@ function qrUrl(){
   return API + '/api/qr-summary?range=' + encodeURIComponent(state.range);
 }
 
-/* ★ [FIX] เดิมตั้งไว้ค่าเดียว 120 วิ ทุกช่วง — 7 วันพอดี แต่ 30 วันโดนตัดก่อนทุกที
-   ตอนนี้แยกตามความยาวช่วง และยึดค่าที่ server บอกมาทาง /api/layout เป็นหลัก
-   (ปรับที่ .env ฝั่ง server ที่เดียว ฝั่งนี้ตามให้เอง) ค่าล่างคือ fallback ตอนที่ยังโหลดผังไม่เสร็จ */
+// fallback ก่อน /api/layout ตอบ — ค่าจริงมาจาก server
 var API_TIMEOUTS = {
-  short_ms: 90000,       // ≤ 2 วัน
-  week_ms: 180000,       // ≤ 7 วัน
-  month_ms: 300000,      // ยาวกว่า 7 วัน
+  short_ms: 90000,
+  week_ms: 180000,
+  month_ms: 300000,
   short_max_days: 2,
   week_max_days: 7
 };
-// ★ เผื่อเวลาให้ฝั่งเรามากกว่า server เสมอ จะได้เห็น error จริงจาก server แทนที่จะถูกเราตัดก่อน
+// เผื่อไว้ให้ยาวกว่า server เสมอ จะได้เห็น error จริงจาก server
 var FETCH_TIMEOUT_MARGIN_MS = 15000;
 
-// ★ ช่วงที่เลือกอยู่ = กี่วัน (custom คิดจากวันที่จริงที่ผู้ใช้เลือก)
 function selectedDays(){
   if (state.range === 'today' || state.range === 'yesterday') return 1;
   if (state.range === 'week') return 7;
@@ -445,7 +440,6 @@ function selectedDays(){
   return 1;
 }
 
-// ★ เวลารอสูงสุดของรอบโหลดนี้ = เพดานฝั่ง server ของช่วงนี้ + เผื่อเวลาส่งข้อมูล
 function fetchTimeoutMs(){
   var d = selectedDays();
   var serverMs = d <= (API_TIMEOUTS.short_max_days || 2) ? API_TIMEOUTS.short_ms
@@ -465,8 +459,6 @@ function loadData(silent){
   btn.disabled = true;
   if (!silent) renderSkeleton(isLongRange() ? t('rpLoadingLong') : '');
 
-  /* ★ ของเดิมไม่มีเพดานเวลาเลย ช่วง 7/30 วันจึงค้างเป็นนาทีโดยไม่บอกอะไรผู้ใช้
-     จนดูเหมือนหน้าจอแฮงก์ ตอนนี้ยกเลิกเองแล้วขึ้นข้อความที่บอกได้ว่าทำอะไรต่อ */
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var timedOut = false;
   var timer = setTimeout(function(){
@@ -689,9 +681,7 @@ function renderChart(list, totalCount){
 
 /* ─── actions ─── */
 function openMachine(id){
-  /* ★ [FIX] เดิมเครื่องที่ยังไม่ได้วางบนผังจะกดไม่ได้เลย — เด้ง alert แล้วจบ
-     ทั้งที่ข้อมูลย้อนหลังของมันมีอยู่ใน DB ครบ (หน้านี้เอามาโชว์อยู่แล้ว)
-     ตอนนี้เปิดได้ทุกเครื่อง ฝั่ง dashboard จะเปิดแผงข้อมูลให้ แม้ไม่มีหมุดบนแผนที่ */
+  /* เครื่องนอกผังก็เปิดได้ — dashboard เปิดแผงข้อมูลให้แม้ไม่มีหมุด */
   var url = 'index.html?machine=' + encodeURIComponent(id) + '&lang=' + curLang;
   /* ★ หน้านี้ถูกเปิดเป็นแท็บใหม่ ถ้าเด้งทับตัวเองกราฟจะหาย
      → ยิงไปที่แท็บชื่อ 'sentra-dashboard' คลิกเครื่องถัดไปก็ใช้แท็บเดิมนั้นซ้ำ ไม่งอกเรื่อย ๆ */
