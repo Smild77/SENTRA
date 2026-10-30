@@ -2,9 +2,6 @@
 node_modules/
 backend/node_modules/
 
-# Portable Node.js runtime (~95 MB, 2000+ ไฟล์) — ของ binary ไม่ควรอยู่ใน git
-# มันมีไว้ให้ start-server.bat หยิบใช้บนเครื่องที่ลง Node.js เองไม่ได้
-# และถูกใส่ลงซิปโดย tools/make-deploy-package.ps1
 node-portable/
 
 # ─── Environment (SECRETS — ห้าม commit!) ───────────
